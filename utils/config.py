@@ -6,7 +6,9 @@
 import json
 import os
 from dataclasses import dataclass
-from typing import Dict, Literal
+from typing import Callable, Dict, Literal
+
+from utils.signature import aiai_li_sign_in_url
 
 
 @dataclass
@@ -18,7 +20,7 @@ class ProviderConfig:
     login_path: str = "/login"
     status_path: str = "/api/status"
     auth_state_path: str = "api/oauth/state"
-    sign_in_path: str | None = "/api/user/sign_in"
+    sign_in_path: str | Callable[[str, str | int], str] | None = "/api/user/sign_in"
     user_info_path: str = "/api/user/self"
     api_user_key: str = "new-api-user"
     github_client_id: str | None = None
@@ -73,11 +75,26 @@ class ProviderConfig:
         """获取认证状态 URL"""
         return f"{self.origin}{self.auth_state_path}"
 
-    def get_sign_in_url(self) -> str | None:
-        """获取签到 URL"""
-        if self.sign_in_path:
-            return f"{self.origin}{self.sign_in_path}"
-        return None
+    def get_sign_in_url(self, user_id: str | int) -> str | None:
+        """获取签到 URL
+
+        如果 sign_in_path 是函数，则调用函数生成带签名的 URL
+
+        Args:
+            user_id: 用户 ID
+
+        Returns:
+            str | None: 签到 URL，如果不需要签到则返回 None
+        """
+        if not self.sign_in_path:
+            return None
+
+        # 如果是函数，则调用函数生成 URL
+        if callable(self.sign_in_path):
+            return self.sign_in_path(self.origin, user_id)
+
+        # 否则拼接路径
+        return f"{self.origin}{self.sign_in_path}"
 
     def get_user_info_url(self) -> str:
         """获取用户信息 URL"""
@@ -132,6 +149,38 @@ class AppConfig:
                 linuxdo_client_id="KZUecGfhhDZMVnv8UtEdhOhf9sNOhqVX",
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=True,
+                bypass_method=None,
+            ),
+            "wong": ProviderConfig(
+                name="wong",
+                origin="https://wzw.de5.net",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                sign_in_path="/api/user/checkin",
+                user_info_path="/api/user/self",
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path=None,
+                linuxdo_client_id="dnJe0SrrGDT8dh4hkbl2bo9R7SQx5If5",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
+            "aiai.li": ProviderConfig(
+                name="aiai.li",
+                origin="https://aiai.li",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                sign_in_path=aiai_li_sign_in_url,
+                user_info_path="/api/user/self",
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path=None,
+                linuxdo_client_id=None,
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
                 bypass_method=None,
             ),
         }

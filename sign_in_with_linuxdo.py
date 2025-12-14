@@ -102,7 +102,9 @@ class LinuxDoSignIn:
             (成功标志, 用户信息字典)
         """
         print(f"ℹ️ {self.account_name}: Executing sign-in with Linux.do")
-        print(f"ℹ️ {self.account_name}: Using client_id: {client_id}, auth_state: {auth_state}, cache_file: {cache_file_path}")
+        print(
+            f"ℹ️ {self.account_name}: Using client_id: {client_id}, auth_state: {auth_state}, cache_file: {cache_file_path}"
+        )
 
         # 使用 Camoufox 启动浏览器
         async with AsyncCamoufox(
@@ -142,15 +144,24 @@ class LinuxDoSignIn:
                     try:
                         print(f"ℹ️ {self.account_name}: Checking login status at {oauth_url}")
                         # 直接访问授权页面检查是否已登录
-                        await page.goto(oauth_url, wait_until="domcontentloaded")
+                        response = await page.goto(oauth_url, wait_until="domcontentloaded")
+                        print(f"ℹ️ {self.account_name}: redirected to app page {response.url if response else 'N/A'}")
+                        await self._save_page_content_to_file(page, "sign_in_check")
 
-                        # 检查是否出现授权按钮（表示已登录）
-                        allow_btn = await page.query_selector('a[href^="/oauth2/approve"]')
-                        if allow_btn:
+                        # 登录后可能直接跳转回应用页面
+                        if response and response.url.startswith(self.provider_config.origin):
                             is_logged_in = True
                             print(f"✅ {self.account_name}: Already logged in via cache, proceeding to authorization")
                         else:
-                            print(f"ℹ️ {self.account_name}: Cache session expired, need to login again")
+                            # 检查是否出现授权按钮（表示已登录）
+                            allow_btn = await page.query_selector('a[href^="/oauth2/approve"]')
+                            if allow_btn:
+                                is_logged_in = True
+                                print(
+                                    f"✅ {self.account_name}: Already logged in via cache, proceeding to authorization"
+                                )
+                            else:
+                                print(f"ℹ️ {self.account_name}: Cache session expired, need to login again")
                     except Exception as e:
                         print(f"⚠️ {self.account_name}: Failed to check login status: {e}")
 

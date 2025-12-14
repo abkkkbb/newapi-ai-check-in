@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""
+CheckIn 类 for 996 hub
+"""
+
+import json
+import os
+import hashlib
+from datetime import datetime
+
+import httpx
+
+
+class CheckIn:
+    """996 hub 签到管理类"""
+
+    def __init__(
+        self,
+        account_name: str,
+        global_proxy: dict | None = None,
+    ):
+        """初始化签到管理器
+
+        Args:
+            account_name: 账号名称
+            global_proxy: 全局代理配置(可选)
+        """
+        self.account_name = account_name
+        self.safe_account_name = "".join(c if c.isalnum() else "_" for c in account_name)
+        self.global_proxy = global_proxy
+        self.http_proxy_config = self._get_http_proxy(global_proxy)
+
+    @staticmethod
+    def _get_http_proxy(proxy_config: dict | None = None) -> httpx.URL | None:
+        """将 proxy_config 转换为 httpx.URL 格式的代理 URL
+
+        Args:
+            proxy_config: 代理配置字典
+
+        Returns:
+            httpx.URL 格式的代理对象，如果没有配置代理则返回 None
+        """
+        if not proxy_config:
+            return None
+
+        proxy_url = proxy_config.get("server")
+        if not proxy_url:
+            return None
+
+        username = proxy_config.get("username")
+        password = proxy_config.get("password")
+
+        if username and password:
+            parsed = httpx.URL(proxy_url)
+            return parsed.copy_with(username=username, password=password)
+
+        return httpx.URL(proxy_url)
+
+    def _check_and_handle_response(self, response: httpx.Response, context: str = "response") -> dict | None:
+        """检查响应类型，如果是 HTML 则保存为文件，否则返回 JSON 数据
+
+        Args:
+            response: httpx Response 对象
+            context: 上下文描述，用于生成文件名
+
+        Returns:
+            JSON 数据字典，如果响应是 HTML 则返回 None
+        """
+        # 创建 logs 目录
+        logs_dir = "logs"
+        os.makedirs(logs_dir, exist_ok=True)
+
+        try:
+            return response.json()
+        except json.JSONDecodeError as e:
+            print(f"❌ {self.account_name}: Failed to parse JSON response: {e}")
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_context = "".join(c if c.isalnum() else "_" for c in context)
+
+            content_type = response.headers.get("content-type", "").lower()
+
+            if "text/html" in content_type or "text/plain" in content_type:
+                filename = f"{self.safe_account_name}_{timestamp}_{safe_context}.html"
+                filepath = os.path.join(logs_dir, filename)
+
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(response.text)
+
+                print(f"⚠️ {self.account_name}: Received HTML response, saved to: {filepath}")
+            else:
+                filename = f"{self.safe_account_name}_{timestamp}_{safe_context}_invalid.txt"
+                filepath = os.path.join(logs_dir, filename)
+
+                with open(filepath, "w", encoding="utf-8") as f:
+                    f.write(response.text)
+
+                print(f"⚠️ {self.account_name}: Invalid response saved to: {filepath}")
+            return None
+        except Exception as e:
+            print(f"❌ {self.account_name}: Error occurred while checking and handling response: {e}")
+            return None
+
+    def execute_check_in(self, client: httpx.Client, headers: dict, auth_token: str) -> bool:
+        """执行签到请求
+
+        Args:
+            client: httpx 客户端
+            headers: 请求头
+            auth_token: Bearer token
+
+        Returns:
+            签到是否成功
+        """
+        print(f"🌐 {self.account_name}: Executing check-in")
+
+        # 构建签到请求头
+        checkin_headers = headers.copy()
+        checkin_headers.update(
+            {
+                "authorization": f"Bearer {auth_token}",
+                "origin": "https://hub.529961.com",
+                "referer": "https://hub.529961.com/checkin",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
+            }
+        )
+
+        response = client.post("https://hub.529961.com/api/checkin", headers=checkin_headers, timeout=30)
+
+        print(f"📨 {self.account_name}: Response status code {response.status_code}")
+
+        # 尝试解析响应（200 或 400 都可能包含有效的 JSON）
+        if response.status_code in [200, 400]:
+            json_data = self._check_and_handle_response(response, "execute_check_in")
+            if json_data is None:
+                print(f"❌ {self.account_name}: Check-in failed - Invalid response format")
+                return False
+
+            # 检查签到结果
+            message = json_data.get("message", json_data.get("msg", ""))
+
+            # "今天已经签到过了" 也算成功
+            if json_data.get("success") or json_data.get("code") == 0 or "已经签到" in message:
+                if "已经签到" in message:
+                    print(f"✅ {self.account_name}: Already checked in today!")
+                else:
+                    print(f"✅ {self.account_name}: Check-in successful!")
+                return True
+            else:
+                error_msg = message if message else "Unknown error"
+                print(f"❌ {self.account_name}: Check-in failed - {error_msg}")
+                return False
+        else:
+            print(f"❌ {self.account_name}: Check-in failed - HTTP {response.status_code}")
+            return False
+
+    def get_checkin_info(self, client: httpx.Client, headers: dict, auth_token: str) -> dict | None:
+        """获取签到信息
+
+        Args:
+            client: httpx 客户端
+            headers: 请求头
+            auth_token: Bearer token
+
+        Returns:
+            签到信息字典，失败返回 None
+        """
+        print(f"ℹ️ {self.account_name}: Getting check-in info")
+
+        # 构建请求头
+        info_headers = headers.copy()
+        info_headers.update(
+            {
+                "authorization": f"Bearer {auth_token}",
+                "origin": "https://hub.529961.com",
+                "referer": "https://hub.529961.com/checkin",
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-origin",
+            }
+        )
+
+        try:
+            response = client.get("https://hub.529961.com/api/checkin/info", headers=info_headers, timeout=30)
+
+            print(f"📨 {self.account_name}: Response status code {response.status_code}")
+
+            if response.status_code == 200:
+                json_data = self._check_and_handle_response(response, "get_checkin_info")
+                if json_data and json_data.get("success"):
+                    data = json_data.get("data", {})
+                    print(f"✅ {self.account_name}: Got check-in info")
+                    print(f"  📅 Has checked today: {data.get('has_checked_today', 'N/A')}")
+                    print(f"  🔥 Continuous days: {data.get('continuous_days', 'N/A')}")
+                    print(f"  📊 Total check-ins: {data.get('total_checkins', 'N/A')}")
+                    print(f"  💰 Total rewards: ${data.get('total_rewards_usd', 'N/A')}")
+                    return data
+                else:
+                    error_msg = json_data.get("message", "Unknown error") if json_data else "Invalid response"
+                    print(f"❌ {self.account_name}: Failed to get check-in info: {error_msg}")
+                    return None
+            else:
+                print(f"❌ {self.account_name}: Failed to get check-in info - HTTP {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"❌ {self.account_name}: Error getting check-in info: {e}")
+            return None
+
+    async def check_in_with_token(self, auth_token: str) -> tuple[bool, dict]:
+        """使用 Bearer token 执行签到操作
+
+        Args:
+            auth_token: Bearer 认证 token
+
+        Returns:
+            (签到是否成功, 用户信息或错误信息)
+        """
+        print(
+            f"ℹ️ {self.account_name}: Executing check-in with Bearer token (using proxy: {'true' if self.http_proxy_config else 'false'})"
+        )
+
+        # 使用 HTTP/1.1 而不是 HTTP/2，匹配 curl 的行为
+        client = httpx.Client(http2=False, timeout=30.0, proxy=self.http_proxy_config)
+        try:
+            # 构建请求头
+            headers = {
+                "accept": "application/json, text/plain, */*",
+                "accept-language": "en,en-US;q=0.9,zh;q=0.8,en-CN;q=0.7,zh-CN;q=0.6,am;q=0.5",
+                "cache-control": "no-cache",
+                "pragma": "no-cache",
+                "priority": "u=1, i",
+                "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"macOS"',
+                "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+            }
+
+            # 执行签到
+            success = self.execute_check_in(client, headers, auth_token)
+
+            if success:
+                user_info = self.get_checkin_info(client, headers, auth_token)
+                if user_info is None:
+                    return False, {"error": "Failed to retrieve user info after check-in"}
+                return True, user_info
+            else:
+                return False, {"error": "Check-in failed"}
+
+        except Exception as e:
+            print(f"❌ {self.account_name}: Error occurred during check-in process - {e}")
+            return False, {"error": f"Check-in process error: {str(e)}"}
+        finally:
+            client.close()
+
+    async def execute(self, access_token: str) -> tuple[bool, dict]:
+        """使用提供的 token 执行签到操作
+
+        Args:
+            access_token: Bearer 认证 token
+
+        Returns:
+            (签到是否成功, 用户信息或错误信息)
+        """
+        print(f"\n\n⏳ Starting to process {self.account_name}")
+
+        # 执行签到
+        print(f"\nℹ️ {self.account_name}: Trying token authentication")
+        success, user_info = await self.check_in_with_token(access_token)
+
+        if success:
+            print(f"✅ {self.account_name}: Token authentication successful")
+        else:
+            print(f"❌ {self.account_name}: Token authentication failed")
+
+        # 返回结果，包含签到信息
+        result = user_info if user_info else {}
+
+        return success, result

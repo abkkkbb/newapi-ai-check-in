@@ -805,12 +805,14 @@ class CheckIn:
                         user_data = response.get("data", {})
                         quota = round(user_data.get("quota", 0) / 500000, 2)
                         used_quota = round(user_data.get("used_quota", 0) / 500000, 2)
-                        print(f"✅ {self.account_name}: " f"Current balance: ${quota}, Used: ${used_quota}")
+                        bonus_quota = round(user_data.get("bonus_quota", 0) / 500000, 2)
+                        print(f"✅ {self.account_name}: " f"Current balance: ${quota}, Used: ${used_quota}, Bonus: ${bonus_quota}")
                         return {
                             "success": True,
                             "quota": quota,
                             "used_quota": used_quota,
-                            "display": f"Current balance: ${quota}, Used: ${used_quota}",
+                            "bonus_quota": bonus_quota,
+                            "display": f"Current balance: ${quota}, Used: ${used_quota}, Bonus: ${bonus_quota}",
                         }
 
                     return {
@@ -857,11 +859,13 @@ class CheckIn:
                     user_data = json_data.get("data", {})
                     quota = round(user_data.get("quota", 0) / 500000, 2)
                     used_quota = round(user_data.get("used_quota", 0) / 500000, 2)
+                    bonus_quota = round(user_data.get("bonus_quota", 0) / 500000, 2)
                     return {
                         "success": True,
                         "quota": quota,
                         "used_quota": used_quota,
-                        "display": f"Current balance: ${quota}, Used: ${used_quota}",
+                        "bonus_quota": bonus_quota,
+                        "display": f"Current balance: ${quota}, Used: ${used_quota}, Bonus: ${bonus_quota}",
                     }
                 else:
                     error_msg = json_data.get("message", "Unknown error")
@@ -879,18 +883,19 @@ class CheckIn:
                 "error": f"Failed to get user info, {e}",
             }
 
-    def execute_check_in(self, client: httpx.Client, headers: dict):
+    def execute_check_in(self, client: httpx.Client, headers: dict, api_user: str | int,):
         """执行签到请求"""
         print(f"🌐 {self.account_name}: Executing check-in")
 
         checkin_headers = headers.copy()
         checkin_headers.update({"Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest"})
 
-        response = client.post(self.provider_config.get_sign_in_url(), headers=checkin_headers, timeout=30)
+        response = client.post(self.provider_config.get_sign_in_url(api_user), headers=checkin_headers, timeout=30)
 
         print(f"📨 {self.account_name}: Response status code {response.status_code}")
 
-        if response.status_code == 200:
+        # 尝试解析响应（200 或 400 都可能包含有效的 JSON）
+        if response.status_code in [200, 400]:
             json_data = self._check_and_handle_response(response, "execute_check_in")
             if json_data is None:
                 # 如果不是 JSON 响应（可能是 HTML），检查是否包含成功标识
@@ -901,7 +906,15 @@ class CheckIn:
                     print(f"❌ {self.account_name}: Check-in failed - Invalid response format")
                     return False
 
-            if json_data.get("ret") == 1 or json_data.get("code") == 0 or json_data.get("success"):
+            # 检查签到结果
+            message = json_data.get("message", json_data.get("msg", ""))
+
+            if (
+                json_data.get("ret") == 1
+                or json_data.get("code") == 0
+                or json_data.get("success")
+                or "已经签到" in message
+            ):
                 print(f"✅ {self.account_name}: Check-in successful!")
                 return True
             else:
@@ -948,7 +961,7 @@ class CheckIn:
                 return False, {"error": "Failed to get user info"}
 
             if needs_check_in is None and self.provider_config.needs_manual_check_in():
-                success = self.execute_check_in(client, headers)
+                success = self.execute_check_in(client, headers, api_user)
                 return success, user_info if user_info else {"error": "No user info available"}
             else:
                 print(f"ℹ️ {self.account_name}: Check-in completed automatically (triggered by user info request)")
@@ -1069,11 +1082,11 @@ class CheckIn:
                                 for cookie in response.cookies.jar:
                                     user_cookies[cookie.name] = cookie.value
 
-                                print(f"ℹ️ {self.account_name}: Extracted {len(user_cookies)} user cookies: {list(user_cookies.keys())}")
-                                merged_cookies = {**waf_cookies, **user_cookies}
-                                return await self.check_in_with_cookies(
-                                    merged_cookies, api_user, needs_check_in=False
+                                print(
+                                    f"ℹ️ {self.account_name}: Extracted {len(user_cookies)} user cookies: {list(user_cookies.keys())}"
                                 )
+                                merged_cookies = {**waf_cookies, **user_cookies}
+                                return await self.check_in_with_cookies(merged_cookies, api_user, needs_check_in=False)
                             else:
                                 print(f"❌ {self.account_name}: No user ID in callback response")
                                 return False, {"error": "No user ID in OAuth callback response"}
@@ -1217,11 +1230,11 @@ class CheckIn:
                                 for cookie in response.cookies.jar:
                                     user_cookies[cookie.name] = cookie.value
 
-                                print(f"ℹ️ {self.account_name}: Extracted {len(user_cookies)} user cookies: {list(user_cookies.keys())}")
-                                merged_cookies = {**waf_cookies, **user_cookies}
-                                return await self.check_in_with_cookies(
-                                    merged_cookies, api_user, needs_check_in=False
+                                print(
+                                    f"ℹ️ {self.account_name}: Extracted {len(user_cookies)} user cookies: {list(user_cookies.keys())}"
                                 )
+                                merged_cookies = {**waf_cookies, **user_cookies}
+                                return await self.check_in_with_cookies(merged_cookies, api_user, needs_check_in=False)
                             else:
                                 print(f"❌ {self.account_name}: No user ID in callback response")
                                 return False, {"error": "No user ID in OAuth callback response"}

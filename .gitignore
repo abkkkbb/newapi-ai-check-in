@@ -8,3 +8,4 @@ screenshots
 storage-states
 logs
 balance_hash.txt
+balance_hash_*.txt

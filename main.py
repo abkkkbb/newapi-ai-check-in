@@ -243,14 +243,16 @@ async def main():
                     # 记录余额信息
                     current_quota = user_info["quota"]
                     current_used = user_info["used_quota"]
+                    current_bonus = user_info["bonus_quota"]
                     this_account_balances[f"{auth_method}"] = {
                         "quota": current_quota,
                         "used": current_used,
+                        "bonus": current_bonus,
                     }
                 else:
                     failed_methods.append(auth_method)
                     error_msg = user_info.get("error", "Unknown error") if user_info else "Unknown error"
-                    account_result += f"    🔺 {str(error_msg)[:100]}...\n"
+                    account_result += f"    🔺 {str(error_msg)}\n"
 
             if account_success:
                 current_balances[account_key] = this_account_balances

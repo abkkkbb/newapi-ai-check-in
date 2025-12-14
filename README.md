@@ -1,11 +1,12 @@
 # newapi.ai 多账号自动签到
 
-> Fork from [anyrouter-check-in](https://github.com/millylee/anyrouter-check-in)，添加 linux.do/github 登录时签到，支持更多场景
 
 用于 Claude Code 中转站 newapi.ai 多账号每日签到。  
-[AnyRouter 限时注册](https://anyrouter.top/register?aff=wJrb)即送 200 美金（推荐额外赠送 100 美金），每日签到赠送 $25。业界良心，支持 `claude-sonnet-4.5`、`gpt-5-codex`，Claude Code 百万上下文（使用 `/model sonnet[1m]` 开启），`gemini-2.5-pro` 模型。  
-[AgentRouter 限时注册](https://agentrouter.org/register?aff=wDU2)即送 200 美金（推荐额外赠送 100 美金），每日签到赠送 $25。支持 `claude-sonnet-4.5`、`gpt-5`、`deepseek-v3.2`、`glm4.6`。  
-其它使用 `newapi.ai` 功能相似
+[AnyRouter 限时注册](https://anyrouter.top/register?aff=wJrb)即送 200 美金（推荐额外赠送 100 美金），每日签到赠送 $25。业界良心，支持 `claude-sonnet-4.5`、`claude-opus-4.5`、`gpt-5-codex`，Claude Code 百万上下文（使用 `/model sonnet[1m]` 开启），`gemini-2.5-pro` 模型。  
+[AgentRouter 限时注册](https://agentrouter.org/register?aff=wDU2)即送 200 美金（推荐额外赠送 100 美金），每日签到赠送 $25。  
+[WONG 限时注册](https://wzw.de5.net/register?aff=N6Q9)即送 100 美金（推荐额外赠送 100 美金），每日签到随机赠送 $1-$5。
+
+其它使用 `newapi.ai` 功能相似, 可自定义 `provider` 支持。
 
 ## 功能特性
 
@@ -72,7 +73,7 @@
 #### 字段说明：
 
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
-- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`, 默认使用 `anyrouter`
+- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`aiai.li`, 默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
 - `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数
