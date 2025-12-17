@@ -806,7 +806,10 @@ class CheckIn:
                         quota = round(user_data.get("quota", 0) / 500000, 2)
                         used_quota = round(user_data.get("used_quota", 0) / 500000, 2)
                         bonus_quota = round(user_data.get("bonus_quota", 0) / 500000, 2)
-                        print(f"✅ {self.account_name}: " f"Current balance: ${quota}, Used: ${used_quota}, Bonus: ${bonus_quota}")
+                        print(
+                            f"✅ {self.account_name}: "
+                            f"Current balance: ${quota}, Used: ${used_quota}, Bonus: ${bonus_quota}"
+                        )
                         return {
                             "success": True,
                             "quota": quota,
@@ -883,7 +886,12 @@ class CheckIn:
                 "error": f"Failed to get user info, {e}",
             }
 
-    def execute_check_in(self, client: httpx.Client, headers: dict, api_user: str | int,):
+    def execute_check_in(
+        self,
+        client: httpx.Client,
+        headers: dict,
+        api_user: str | int,
+    ):
         """执行签到请求"""
         print(f"🌐 {self.account_name}: Executing check-in")
 
@@ -925,9 +933,7 @@ class CheckIn:
             print(f"❌ {self.account_name}: Check-in failed - HTTP {response.status_code}")
             return False
 
-    async def check_in_with_cookies(
-        self, cookies: dict, api_user: str | int, needs_check_in: bool | None = None
-    ) -> tuple[bool, dict]:
+    async def check_in_with_cookies(self, cookies: dict, api_user: str | int) -> tuple[bool, dict]:
         """使用已有 cookies 执行签到操作"""
         print(
             f"ℹ️ {self.account_name}: Executing check-in with existing cookies (using proxy: {'true' if self.http_proxy_config else 'false'})"
@@ -951,21 +957,24 @@ class CheckIn:
                 self.provider_config.api_user_key: f"{api_user}",
             }
 
+            if self.provider_config.needs_manual_check_in():
+                success = self.execute_check_in(client, headers, api_user)
+                if not success:
+                    return False, {"error": "Check-in failed"}
+            else:
+                print(f"ℹ️ {self.account_name}: Check-in completed automatically (triggered by user info request)")
+
             user_info = await self.get_user_info(client, headers)
             if user_info and user_info.get("success"):
                 success_msg = user_info.get("display", "User info retrieved successfully")
-                print(f"✅ {success_msg}")
+                print(f"✅ {self.account_name}: {success_msg}")
+                return True, user_info
             elif user_info:
                 error_msg = user_info.get("error", "Unknown error")
                 print(f"❌ {self.account_name}: {error_msg}")
                 return False, {"error": "Failed to get user info"}
-
-            if needs_check_in is None and self.provider_config.needs_manual_check_in():
-                success = self.execute_check_in(client, headers, api_user)
-                return success, user_info if user_info else {"error": "No user info available"}
             else:
-                print(f"ℹ️ {self.account_name}: Check-in completed automatically (triggered by user info request)")
-                return True, user_info if user_info else {"error": "No user info available"}
+                return False, {"error": "No user info available"}
 
         except Exception as e:
             print(f"❌ {self.account_name}: Error occurred during check-in process - {e}")
@@ -1053,7 +1062,7 @@ class CheckIn:
                 api_user = result_data["api_user"]
 
                 merged_cookies = {**waf_cookies, **user_cookies}
-                return await self.check_in_with_cookies(merged_cookies, api_user, needs_check_in=False)
+                return await self.check_in_with_cookies(merged_cookies, api_user)
             elif success and "code" in result_data and "state" in result_data:
                 # 收到 OAuth code，通过 HTTP 调用回调接口获取 api_user
                 print(f"ℹ️ {self.account_name}: Received OAuth code, calling callback API")
@@ -1086,7 +1095,7 @@ class CheckIn:
                                     f"ℹ️ {self.account_name}: Extracted {len(user_cookies)} user cookies: {list(user_cookies.keys())}"
                                 )
                                 merged_cookies = {**waf_cookies, **user_cookies}
-                                return await self.check_in_with_cookies(merged_cookies, api_user, needs_check_in=False)
+                                return await self.check_in_with_cookies(merged_cookies, api_user)
                             else:
                                 print(f"❌ {self.account_name}: No user ID in callback response")
                                 return False, {"error": "No user ID in OAuth callback response"}
@@ -1201,7 +1210,7 @@ class CheckIn:
                 api_user = result_data["api_user"]
 
                 merged_cookies = {**waf_cookies, **user_cookies}
-                return await self.check_in_with_cookies(merged_cookies, api_user, needs_check_in=False)
+                return await self.check_in_with_cookies(merged_cookies, api_user)
             elif success and "code" in result_data and "state" in result_data:
                 # 收到 OAuth code，通过 HTTP 调用回调接口获取 api_user
                 print(f"ℹ️ {self.account_name}: Received OAuth code, calling callback API")
@@ -1234,7 +1243,7 @@ class CheckIn:
                                     f"ℹ️ {self.account_name}: Extracted {len(user_cookies)} user cookies: {list(user_cookies.keys())}"
                                 )
                                 merged_cookies = {**waf_cookies, **user_cookies}
-                                return await self.check_in_with_cookies(merged_cookies, api_user, needs_check_in=False)
+                                return await self.check_in_with_cookies(merged_cookies, api_user)
                             else:
                                 print(f"❌ {self.account_name}: No user ID in callback response")
                                 return False, {"error": "No user ID in OAuth callback response"}
