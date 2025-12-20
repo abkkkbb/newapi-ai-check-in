@@ -153,7 +153,7 @@ class AppConfig:
             ),
             "wong": ProviderConfig(
                 name="wong",
-                origin="https://wzw.de5.net",
+                origin="https://wzw.pp.ua",
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
