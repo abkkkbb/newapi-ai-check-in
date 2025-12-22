@@ -162,7 +162,7 @@ class AppConfig:
                 api_user_key="new-api-user",
                 github_client_id=None,
                 github_auth_path=None,
-                linuxdo_client_id="dnJe0SrrGDT8dh4hkbl2bo9R7SQx5If5",
+                linuxdo_client_id="451QxPCe4n9e7XrvzokzPcqPH9rUyTQF",
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method=None,

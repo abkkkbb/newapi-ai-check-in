@@ -1,0 +1,581 @@
+#!/usr/bin/env python3
+"""
+使用 Camoufox 登录 Linux.do 并浏览帖子
+"""
+
+import asyncio
+import hashlib
+import json
+import os
+import sys
+import random
+from datetime import datetime
+from dotenv import load_dotenv
+from camoufox.async_api import AsyncCamoufox
+from utils.notify import notify
+
+# 默认缓存目录，与 checkin.py 保持一致
+DEFAULT_STORAGE_STATE_DIR = "storage-states"
+
+# 帖子起始 ID，从环境变量获取，默认 1000000
+DEFAULT_BASE_TOPIC_ID = 1000000
+
+# 帖子 ID 缓存目录
+TOPIC_ID_CACHE_DIR = "linuxdo_reads"
+
+
+class LinuxDoReadPosts:
+    """Linux.do 帖子浏览类"""
+
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        storage_state_dir: str = DEFAULT_STORAGE_STATE_DIR,
+    ):
+        """初始化
+
+        Args:
+            username: Linux.do 用户名
+            password: Linux.do 密码
+            storage_state_dir: 缓存目录，默认与 checkin.py 共享
+        """
+        self.username = username
+        self.password = password
+        self.storage_state_dir = storage_state_dir
+        # 使用用户名哈希生成缓存文件名，与 checkin.py 保持一致
+        self.username_hash = hashlib.sha256(username.encode("utf-8")).hexdigest()[:8]
+
+        os.makedirs(self.storage_state_dir, exist_ok=True)
+        os.makedirs(TOPIC_ID_CACHE_DIR, exist_ok=True)
+
+        # 每个用户独立的 topic_id 缓存文件
+        self.topic_id_cache_file = os.path.join(TOPIC_ID_CACHE_DIR, f"{self.username_hash}_topic_id.txt")
+
+    async def _take_screenshot(self, page, reason: str) -> None:
+        """截取当前页面的屏幕截图
+
+        Args:
+            page: Camoufox 页面对象
+            reason: 截图原因描述
+        """
+        try:
+            screenshots_dir = "screenshots"
+            os.makedirs(screenshots_dir, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
+            filename = f"linuxdo_{self.username_hash}_{timestamp}_{safe_reason}.png"
+            filepath = os.path.join(screenshots_dir, filename)
+
+            await page.screenshot(path=filepath, full_page=True)
+            print(f"📸 {self.username}: Screenshot saved to {filepath}")
+        except Exception as e:
+            print(f"⚠️ {self.username}: Failed to take screenshot: {e}")
+
+    async def _save_page_content_to_file(self, page, reason: str) -> None:
+        """保存页面 HTML 到日志文件
+
+        Args:
+            page: Camoufox 页面对象
+            reason: 日志原因描述
+        """
+        try:
+            logs_dir = "logs"
+            os.makedirs(logs_dir, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
+            filename = f"linuxdo_{self.username_hash}_{timestamp}_{safe_reason}.html"
+            filepath = os.path.join(logs_dir, filename)
+
+            html_content = await page.content()
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_content)
+
+            print(f"📄 {self.username}: Page HTML saved to {filepath}")
+        except Exception as e:
+            print(f"⚠️ {self.username}: Failed to save HTML: {e}")
+
+    async def _is_logged_in(self, page) -> bool:
+        """检查是否已登录
+
+        通过访问 https://linux.do/ 后检查 URL 是否跳转到登录页面来判断
+
+        Args:
+            page: Camoufox 页面对象
+
+        Returns:
+            是否已登录
+        """
+        try:
+            print(f"ℹ️ {self.username}: Checking login status...")
+            await page.goto("https://linux.do/", wait_until="domcontentloaded")
+            await page.wait_for_timeout(3000)  # 等待可能的重定向
+
+            current_url = page.url
+            print(f"ℹ️ {self.username}: Current URL: {current_url}")
+
+            # 如果跳转到登录页面，说明未登录
+            if current_url.startswith("https://linux.do/login"):
+                print(f"ℹ️ {self.username}: Redirected to login page, not logged in")
+                return False
+
+            print(f"✅ {self.username}: Already logged in")
+            return True
+        except Exception as e:
+            print(f"⚠️ {self.username}: Error checking login status: {e}")
+            return False
+
+    async def _do_login(self, page) -> bool:
+        """执行登录流程
+
+        Args:
+            page: Camoufox 页面对象
+
+        Returns:
+            登录是否成功
+        """
+        try:
+            print(f"ℹ️ {self.username}: Starting login process...")
+
+            # 如果当前不在登录页面，先导航到登录页面
+            if not page.url.startswith("https://linux.do/login"):
+                await page.goto("https://linux.do/login", wait_until="domcontentloaded")
+
+            await page.wait_for_timeout(2000)
+
+            # 填写用户名
+            await page.fill("#login-account-name", self.username)
+            await page.wait_for_timeout(2000)
+
+            # 填写密码
+            await page.fill("#login-account-password", self.password)
+            await page.wait_for_timeout(2000)
+
+            # 点击登录按钮
+            await page.click("#login-button")
+            await page.wait_for_timeout(10000)
+
+            await self._save_page_content_to_file(page, "login_result")
+
+            # 检查是否遇到 Cloudflare 验证
+            current_url = page.url
+            print(f"ℹ️ {self.username}: URL after login: {current_url}")
+
+            if "linux.do/challenge" in current_url:
+                print(
+                    f"⚠️ {self.username}: Cloudflare challenge detected, "
+                    "Camoufox should bypass it automatically. Waiting..."
+                )
+                # 等待 Cloudflare 验证完成，最多等待60秒
+                try:
+                    await page.wait_for_url("https://linux.do/", timeout=60000)
+                    print(f"✅ {self.username}: Cloudflare challenge bypassed")
+                except Exception:
+                    print(f"⚠️ {self.username}: Cloudflare challenge timeout")
+
+            # 再次检查是否登录成功
+            current_url = page.url
+            if current_url.startswith("https://linux.do/login"):
+                print(f"❌ {self.username}: Login failed, still on login page")
+                await self._take_screenshot(page, "login_failed")
+                return False
+
+            print(f"✅ {self.username}: Login successful")
+            return True
+
+        except Exception as e:
+            print(f"❌ {self.username}: Error during login: {e}")
+            await self._take_screenshot(page, "login_error")
+            return False
+
+    def _load_topic_id(self) -> int:
+        """从缓存文件读取上次的 topic_id
+
+        Returns:
+            缓存的 topic_id，如果文件不存在则返回 0
+        """
+        try:
+            if os.path.exists(self.topic_id_cache_file):
+                with open(self.topic_id_cache_file, "r", encoding="utf-8") as f:
+                    return int(f.read().strip())
+        except (ValueError, IOError) as e:
+            print(f"⚠️ {self.username}: Failed to load topic ID from cache: {e}")
+        return 0
+
+    def _save_topic_id(self, topic_id: int) -> None:
+        """保存 topic_id 到缓存文件
+
+        Args:
+            topic_id: 当前的 topic_id
+        """
+        try:
+            with open(self.topic_id_cache_file, "w", encoding="utf-8") as f:
+                f.write(str(topic_id))
+            print(f"ℹ️ {self.username}: Saved topic ID {topic_id} to cache")
+        except IOError as e:
+            print(f"⚠️ {self.username}: Failed to save topic ID: {e}")
+
+    async def _read_posts(self, page, base_topic_id: int, max_posts: int) -> int:
+        """浏览帖子
+
+        从 base_topic_id 开始，随机向上加 1-5 打开链接，
+        查找 class timeline-replies 标签判断帖子是否有效。
+        根据剩余可读数量自动滚动浏览。
+
+        Args:
+            page: Camoufox 页面对象
+            max_posts: 最大浏览帖子数
+
+        Returns:
+            最后浏览的帖子ID
+        """
+
+        # 从缓存文件读取上次的 topic_id
+        cached_topic_id = self._load_topic_id()
+
+        # 取环境变量和缓存中的最大值
+        current_topic_id = max(base_topic_id, cached_topic_id)
+        print(
+            f"ℹ️ {self.username}: Starting from topic ID {current_topic_id} "
+            f"(base: {base_topic_id}, cached: {cached_topic_id})"
+        )
+
+        read_count = 0
+
+        while read_count < max_posts:
+            # 随机向上加 1-5
+            current_topic_id += random.randint(1, 5)
+            topic_url = f"https://linux.do/t/topic/{current_topic_id}"
+
+            try:
+                print(f"ℹ️ {self.username}: Opening topic {current_topic_id}...")
+                await page.goto(topic_url, wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)
+
+                # 查找 timeline-replies 标签
+                timeline_element = await page.query_selector(".timeline-replies")
+
+                if timeline_element:
+                    # 获取 innerHTML 解析当前页/总页数，格式为 "当前 / 总数"
+                    inner_html = await timeline_element.inner_html()
+                    print(f"✅ {self.username}: Topic {current_topic_id} - " f"Progress: {inner_html.strip()}")
+
+                    # 解析页数信息并滚动浏览
+                    try:
+                        parts = inner_html.strip().split("/")
+                        if len(parts) == 2:
+                            current_page = int(parts[0].strip())
+                            total_pages = int(parts[1].strip())
+
+                            if current_page < total_pages:
+                                print(
+                                    f"ℹ️ {self.username}: Scrolling to read "
+                                    f"remaining {total_pages - current_page} pages..."
+                                )
+                                # 自动滚动浏览剩余内容
+                                await self._scroll_to_read(page)
+
+                                read_count += total_pages - current_page
+                                remaining_read_count = max_posts - read_count
+                                print(f"ℹ️ {self.username}: {read_count} read, {remaining_read_count} remaining...")
+                        else:
+                            print(f"ℹ️ {self.username}: Timeline read error(content: {inner_html}), continue")
+                            continue
+                    except (ValueError, IndexError) as e:
+                        print(f"⚠️ {self.username}: Failed to parse progress: {e}")
+
+                    # 模拟阅读后等待
+                    await page.wait_for_timeout(random.randint(1000, 2000))
+                else:
+                    print(f"ℹ️ {self.username}: Topic {current_topic_id} not found or invalid, skipping...")
+
+            except Exception as e:
+                print(f"⚠️ {self.username}: Error reading topic {current_topic_id}: {e}")
+
+        # 保存当前 topic_id 到缓存
+        self._save_topic_id(current_topic_id)
+
+        return current_topic_id
+
+    async def _scroll_to_read(self, page) -> None:
+        """自动滚动浏览帖子内容
+
+        根据 timeline-replies 元素内容判断是否已到底部
+
+        Args:
+            page: Camoufox 页面对象
+        """
+        last_current_page = 0
+        last_total_pages = 0
+
+        while True:
+            # 执行滚动
+            await page.evaluate("window.scrollBy(0, window.innerHeight)")
+
+            # 每次滚动后等待 1-3 秒，模拟阅读
+            await page.wait_for_timeout(random.randint(1000, 3000))
+
+            # 检查 timeline-replies 内容判断是否到底
+            timeline_element = await page.query_selector(".timeline-replies")
+            if not timeline_element:
+                print(f"ℹ️ {self.username}: Timeline element not found, stopping")
+                break
+
+            inner_html = await timeline_element.inner_html()
+            try:
+                parts = inner_html.strip().split("/")
+                if len(parts) == 2:
+                    current_page = int(parts[0].strip())
+                    total_pages = int(parts[1].strip())
+
+                    # 如果滚动后页数没变，说明已经到底了
+                    if current_page == last_current_page and total_pages == last_total_pages:
+                        print(
+                            f"ℹ️ {self.username}: Page not changing " f"({current_page}/{total_pages}), reached bottom"
+                        )
+                        break
+
+                    # 如果当前页等于总页数，说明到底了
+                    if current_page >= total_pages:
+                        print(f"ℹ️ {self.username}: Reached end " f"({current_page}/{total_pages}) after scrolling")
+                        break
+
+                    # 缓存当前页数
+                    last_current_page = current_page
+                    last_total_pages = total_pages
+                else:
+                    print(f"ℹ️ {self.username}: Timeline read error(content: {inner_html}), stopping")
+                    break
+            except (ValueError, IndexError):
+                pass
+
+    async def run(self, max_posts: int = 100) -> tuple[bool, dict]:
+        """执行浏览帖子任务
+
+        Args:
+            max_posts: 最大浏览帖子数，默认 100
+
+        Returns:
+            (成功标志, 结果信息字典)
+        """
+        print(f"ℹ️ {self.username}: Starting Linux.do read posts task")
+
+        # 缓存文件路径，与 checkin.py 保持一致
+        cache_file_path = f"{self.storage_state_dir}/linuxdo_{self.username_hash}_storage_state.json"
+
+        # 从环境变量获取起始 ID
+        base_topic_id = int(os.getenv("LINUXDO_BASE_TOPIC_ID", DEFAULT_BASE_TOPIC_ID))
+
+        async with AsyncCamoufox(
+            headless=False,
+            humanize=True,
+            locale="en-US",
+        ) as browser:
+            # 加载缓存的 storage state（如果存在）
+            storage_state = cache_file_path if os.path.exists(cache_file_path) else None
+            if storage_state:
+                print(f"ℹ️ {self.username}: Restoring storage state from cache")
+            else:
+                print(f"ℹ️ {self.username}: No cache file found, starting fresh")
+
+            context = await browser.new_context(storage_state=storage_state)
+            page = await context.new_page()
+
+            try:
+                # 检查是否已登录
+                is_logged_in = await self._is_logged_in(page)
+
+                # 如果未登录，执行登录流程
+                if not is_logged_in:
+                    login_success = await self._do_login(page)
+                    if not login_success:
+                        return False, {"error": "Login failed"}
+
+                    # 保存会话状态
+                    await context.storage_state(path=cache_file_path)
+                    print(f"✅ {self.username}: Storage state saved to cache file")
+
+                # 浏览帖子
+                print(f"ℹ️ {self.username}: Starting to read posts...")
+                last_topic_id = await self._read_posts(page, base_topic_id, max_posts)
+
+                print(f"✅ {self.username}: Successfully read {max_posts} posts")
+                return True, {
+                    "read_count": max_posts,
+                    "last_topic_id": last_topic_id,
+                }
+
+            except Exception as e:
+                print(f"❌ {self.username}: Error occurred: {e}")
+                await self._take_screenshot(page, "error")
+                return False, {"error": str(e)}
+            finally:
+                await page.close()
+                await context.close()
+
+
+def load_linuxdo_accounts() -> list[dict]:
+    """从 ACCOUNTS 环境变量加载配置了 linux.do 登录方式的账号
+
+    Returns:
+        包含 linux.do 账号信息的列表，每个元素为:
+        {"username": str, "password": str}
+    """
+    accounts_str = os.getenv("ACCOUNTS")
+    if not accounts_str:
+        print("❌ ACCOUNTS environment variable not found")
+        return []
+
+    try:
+        accounts_data = json.loads(accounts_str)
+
+        if not isinstance(accounts_data, list):
+            print("❌ ACCOUNTS must be a JSON array")
+            return []
+
+        linuxdo_accounts = []
+        seen_usernames = set()
+
+        for i, account in enumerate(accounts_data):
+            if not isinstance(account, dict):
+                continue
+
+            # 检查是否有 linux.do 配置
+            linux_do_config = account.get("linux.do")
+            if not linux_do_config:
+                continue
+
+            if not isinstance(linux_do_config, dict):
+                print(f"⚠️ Account {i + 1} linux.do config must be a dictionary")
+                continue
+
+            username = linux_do_config.get("username")
+            password = linux_do_config.get("password")
+
+            if not username or not password:
+                print(f"⚠️ Account {i + 1} linux.do missing username or password")
+                continue
+
+            # 根据 username 去重
+            if username in seen_usernames:
+                print(f"ℹ️ Skipping duplicate account: {username}")
+                continue
+
+            seen_usernames.add(username)
+            linuxdo_accounts.append(
+                {
+                    "username": username,
+                    "password": password,
+                }
+            )
+
+        return linuxdo_accounts
+
+    except json.JSONDecodeError as e:
+        print(f"❌ Failed to parse ACCOUNTS: {e}")
+        return []
+    except Exception as e:
+        print(f"❌ Error loading accounts: {e}")
+        return []
+
+
+async def main():
+    """主函数"""
+    load_dotenv(override=True)
+
+    print("🚀 Linux.do read posts script started")
+    print(f'🕒 Execution time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+
+    # 加载配置了 linux.do 的账号
+    accounts = load_linuxdo_accounts()
+
+    if not accounts:
+        print("❌ No accounts with linux.do configuration found")
+        return
+
+    print(f"ℹ️ Found {len(accounts)} account(s) with linux.do configuration")
+
+    # 收集结果用于通知
+    results = []
+
+    # 为每个账号执行任务
+    for account in accounts:
+        print(f"\n{'='*50}")
+        print(f"📌 Processing: {account['username']}")
+        print(f"{'='*50}")
+
+        reader = LinuxDoReadPosts(
+            username=account["username"],
+            password=account["password"],
+        )
+
+        start_time = datetime.now()
+        success, result = await reader.run(random.randint(50, 100))
+        end_time = datetime.now()
+        duration = end_time - start_time
+
+        # 格式化时长为 HH:MM:SS
+        total_seconds = int(duration.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        print(f"Result: success={success}, result={result}, duration={duration_str}")
+
+        # 记录结果
+        results.append(
+            {
+                "username": account["username"],
+                "success": success,
+                "result": result,
+                "duration": duration_str,
+            }
+        )
+
+    # 发送通知
+    if results:
+        notification_lines = [
+            f'🕒 Execution time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
+            "",
+        ]
+
+        total_read_count = 0
+        for r in results:
+            username = r["username"]
+            duration = r["duration"]
+            if r["success"]:
+                read_count = r["result"].get("read_count", 0)
+                total_read_count += read_count
+                last_topic_id = r["result"].get("last_topic_id", "unknown")
+                topic_url = f"https://linux.do/t/topic/{last_topic_id}"
+                notification_lines.append(
+                    f"✅ {username}: Read {read_count} posts ({duration})\n" f"   Last topic: {topic_url}"
+                )
+            else:
+                error = r["result"].get("error", "Unknown error")
+                notification_lines.append(f"❌ {username}: {error} ({duration})")
+
+        # 添加阅读总数
+        notification_lines.append("")
+        notification_lines.append(f"📊 Total read: {total_read_count} posts")
+
+        notify_content = "\n".join(notification_lines)
+        notify.push_message("Linux.do Read Posts", notify_content, msg_type="text")
+
+
+def run_main():
+    """运行主函数的包装函数"""
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n⚠️ Program interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n❌ Error occurred during program execution: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    run_main()

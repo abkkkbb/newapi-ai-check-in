@@ -1,0 +1,149 @@
+name: Linux.do 自动阅读帖子
+on:
+  schedule:
+    # UTC 时间，北京时间 8-24 点每2小时执行一次
+    # UTC 00:00 = 北京 08:00
+    # UTC 02,04,06,08,10,12,14,16 = 北京 10,12,14,16,18,20,22,24
+    - cron: '0 0,2,4,6,8,10,12,14,16 * * *'  # 北京 08,10,12,14,16,18,20,22,24
+  workflow_dispatch:
+
+jobs:
+  read-posts:
+    permissions:
+      id-token: write
+      contents: read
+    runs-on: windows-2025
+    environment: production
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+    - name: set beijing timezone
+      uses: szenius/set-timezone@v2.0
+      with:
+        timezoneWindows: "China Standard Time"
+
+    - uses: actions/checkout@v4
+
+    - uses: astral-sh/setup-uv@v3
+      with:
+        version: "latest"
+
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 缓存 UV 依赖
+      uses: actions/cache@v4
+      id: uv-cache
+      with:
+        path: |
+          ~/.cache/uv
+          .venv
+        key: ${{ runner.os }}-uv-${{ hashFiles('pyproject.toml', 'uv.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-uv-
+
+    - name: 安装依赖
+      if: steps.uv-cache.outputs.cache-hit != 'true'
+      run: |
+        echo "缓存未命中，开始安装项目依赖..."
+        uv sync
+        echo "✅ 环境初始化完成"
+
+    - name: 获取 Camoufox 版本
+      id: camoufox-version
+      run: |
+        $version = uv run python -c "import importlib.metadata; print(importlib.metadata.version('camoufox'))"
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        echo "Camoufox version: $version"
+
+    - name: 缓存 Camoufox 浏览器
+      uses: actions/cache@v4
+      id: camoufox-cache
+      with:
+        path: ~\AppData\Local\camoufox
+        key: ${{ runner.os }}-camoufox-${{ steps.camoufox-version.outputs.version }}
+        restore-keys: |
+          ${{ runner.os }}-camoufox-
+
+    - name: 安装 Camoufox 浏览器
+      if: steps.camoufox-cache.outputs.cache-hit != 'true'
+      run: |
+        echo "缓存未命中，开始下载 Camoufox 浏览器..."
+        uv run camoufox fetch
+        echo "✅ Camoufox 浏览器安装完成"
+
+    - name: 恢复登录状态缓存
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          storage-states
+        key: storage-state-${{ hashFiles('storage-states/*.json') }}
+        restore-keys: |
+          storage-state-
+
+    - name: 恢复帖子ID缓存
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          linuxdo_reads
+        key: linuxdo-reads-${{ hashFiles('linuxdo_reads/*.txt') }}
+        restore-keys: |
+          linuxdo-reads-
+
+    - name: 执行阅读帖子
+      env:
+        ACCOUNTS: ${{ secrets.ACCOUNTS }}
+        LINUXDO_BASE_TOPIC_ID: ${{ secrets.LINUXDO_BASE_TOPIC_ID }}
+        DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
+        EMAIL_USER: ${{ secrets.EMAIL_USER }}
+        EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
+        EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        CUSTOM_SMTP_SERVER: ${{ secrets.CUSTOM_SMTP_SERVER }}
+        PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        SERVERPUSHKEY: ${{ secrets.SERVERPUSHKEY }}
+        FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        WEIXIN_WEBHOOK: ${{ secrets.WEIXIN_WEBHOOK }}
+      run: |
+        # 列出 linuxdo_reads 目录文件
+        if (Test-Path "linuxdo_reads") {
+          echo "📁 linuxdo_reads 目录内容:"
+          Get-ChildItem -Path linuxdo_reads -File | ForEach-Object { echo "  - $($_.Name)" }
+        } else {
+          echo "⚠️ linuxdo_reads 目录不存在"
+        }
+        # 执行阅读帖子
+        uv run python -u linuxdo_read_posts.py
+
+    - name: 保存登录状态缓存
+      if: hashFiles('storage-states/*.json') != ''
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          storage-states
+        key: storage-state-${{ hashFiles('storage-states/*.json') }}
+
+    - name: 保存帖子ID缓存
+      if: hashFiles('linuxdo_reads/*.txt') != ''
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          linuxdo_reads
+        key: linuxdo-reads-${{ hashFiles('linuxdo_reads/*.txt') }}
+
+    - name: 保存日志
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: linuxdo-read-artifacts-${{ github.run_number }}
+        path: |
+          logs/
+          screenshots/
+        if-no-files-found: ignore
+        retention-days: 7
+
+    - name: 执行结果
+      if: always()
+      run: |
+        echo "阅读帖子任务执行完成"
+        echo "时间: $(Get-Date)"
