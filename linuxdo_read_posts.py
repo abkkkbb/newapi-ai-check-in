@@ -17,8 +17,8 @@ from utils.notify import notify
 # 默认缓存目录，与 checkin.py 保持一致
 DEFAULT_STORAGE_STATE_DIR = "storage-states"
 
-# 帖子起始 ID，从环境变量获取，默认 1000000
-DEFAULT_BASE_TOPIC_ID = 1000000
+# 帖子起始 ID，从环境变量获取，默认 随机从100000-1100000选一个
+DEFAULT_BASE_TOPIC_ID = random.randint(1000000, 1100000)
 
 # 帖子 ID 缓存目录
 TOPIC_ID_CACHE_DIR = "linuxdo_reads"
@@ -199,7 +199,11 @@ class LinuxDoReadPosts:
         try:
             if os.path.exists(self.topic_id_cache_file):
                 with open(self.topic_id_cache_file, "r", encoding="utf-8") as f:
-                    return int(f.read().strip())
+                    content = f.read().strip()
+                    if content:
+                        return int(content)
+                    else:
+                        print(f"⚠️ {self.username}: Failed to load topic ID from cache, content is empty")
         except (ValueError, IOError) as e:
             print(f"⚠️ {self.username}: Failed to load topic ID from cache: {e}")
         return 0
@@ -217,7 +221,7 @@ class LinuxDoReadPosts:
         except IOError as e:
             print(f"⚠️ {self.username}: Failed to save topic ID: {e}")
 
-    async def _read_posts(self, page, base_topic_id: int, max_posts: int) -> int:
+    async def _read_posts(self, page, base_topic_id: int, max_posts: int) -> tuple[int, int]:
         """浏览帖子
 
         从 base_topic_id 开始，随机向上加 1-5 打开链接，
@@ -229,7 +233,7 @@ class LinuxDoReadPosts:
             max_posts: 最大浏览帖子数
 
         Returns:
-            最后浏览的帖子ID
+            (最后浏览的帖子ID, 实际阅读数量)
         """
 
         # 从缓存文件读取上次的 topic_id
@@ -243,10 +247,18 @@ class LinuxDoReadPosts:
         )
 
         read_count = 0
+        invalid_count = 0  # 连续无效帖子计数
 
         while read_count < max_posts:
-            # 随机向上加 1-5
-            current_topic_id += random.randint(1, 5)
+            # 如果连续无效超过5次，跳过100个ID
+            if invalid_count >= 5:
+                current_topic_id += 100
+                print(f"⚠️ {self.username}: Too many invalid topics, jumping ahead by 100 to {current_topic_id}")
+                invalid_count = 0
+            else:
+                # 随机向上加 1-5
+                current_topic_id += random.randint(1, 5)
+
             topic_url = f"https://linux.do/t/topic/{current_topic_id}"
 
             try:
@@ -258,16 +270,19 @@ class LinuxDoReadPosts:
                 timeline_element = await page.query_selector(".timeline-replies")
 
                 if timeline_element:
-                    # 获取 innerHTML 解析当前页/总页数，格式为 "当前 / 总数"
-                    inner_html = await timeline_element.inner_html()
-                    print(f"✅ {self.username}: Topic {current_topic_id} - " f"Progress: {inner_html.strip()}")
+                    # 获取 innerText 解析当前页/总页数，格式为 "当前 / 总数"
+                    inner_text = await timeline_element.inner_text()
+                    print(f"✅ {self.username}: Topic {current_topic_id} - " f"Progress: {inner_text.strip()}")
 
                     # 解析页数信息并滚动浏览
                     try:
-                        parts = inner_html.strip().split("/")
-                        if len(parts) == 2:
+                        parts = inner_text.strip().split("/")
+                        if len(parts) == 2 and parts[0].strip().isdigit() and parts[1].strip().isdigit():
                             current_page = int(parts[0].strip())
                             total_pages = int(parts[1].strip())
+
+                            # 有效帖子，重置无效计数
+                            invalid_count = 0
 
                             if current_page < total_pages:
                                 print(
@@ -278,26 +293,33 @@ class LinuxDoReadPosts:
                                 await self._scroll_to_read(page)
 
                                 read_count += total_pages - current_page
-                                remaining_read_count = max_posts - read_count
-                                print(f"ℹ️ {self.username}: {read_count} read, {remaining_read_count} remaining...")
+                                remaining_read_count = max(0, max_posts - read_count)
+                                print(
+                                    f"ℹ️ {self.username}: {read_count} read, "
+                                    f"{remaining_read_count} remaining..."
+                                )
                         else:
-                            print(f"ℹ️ {self.username}: Timeline read error(content: {inner_html}), continue")
+                            print(f"⚠️ {self.username}: Timeline read error(content: {inner_text}), continue")
+                            invalid_count += 1
                             continue
                     except (ValueError, IndexError) as e:
                         print(f"⚠️ {self.username}: Failed to parse progress: {e}")
+                        invalid_count += 1
 
                     # 模拟阅读后等待
                     await page.wait_for_timeout(random.randint(1000, 2000))
                 else:
-                    print(f"ℹ️ {self.username}: Topic {current_topic_id} not found or invalid, skipping...")
+                    print(f"⚠️ {self.username}: Topic {current_topic_id} not found or invalid, skipping...")
+                    invalid_count += 1
 
             except Exception as e:
                 print(f"⚠️ {self.username}: Error reading topic {current_topic_id}: {e}")
+                invalid_count += 1
 
         # 保存当前 topic_id 到缓存
         self._save_topic_id(current_topic_id)
 
-        return current_topic_id
+        return current_topic_id, read_count
 
     async def _scroll_to_read(self, page) -> None:
         """自动滚动浏览帖子内容
@@ -323,10 +345,10 @@ class LinuxDoReadPosts:
                 print(f"ℹ️ {self.username}: Timeline element not found, stopping")
                 break
 
-            inner_html = await timeline_element.inner_html()
+            inner_html = await timeline_element.inner_text()
             try:
                 parts = inner_html.strip().split("/")
-                if len(parts) == 2:
+                if len(parts) == 2 and parts[0].strip().isdigit() and parts[1].strip().isdigit():
                     current_page = int(parts[0].strip())
                     total_pages = int(parts[1].strip())
 
@@ -366,7 +388,8 @@ class LinuxDoReadPosts:
         cache_file_path = f"{self.storage_state_dir}/linuxdo_{self.username_hash}_storage_state.json"
 
         # 从环境变量获取起始 ID
-        base_topic_id = int(os.getenv("LINUXDO_BASE_TOPIC_ID", DEFAULT_BASE_TOPIC_ID))
+        base_topic_id_str = os.getenv("LINUXDO_BASE_TOPIC_ID", "")
+        base_topic_id = int(base_topic_id_str) if base_topic_id_str else DEFAULT_BASE_TOPIC_ID
 
         async with AsyncCamoufox(
             headless=False,
@@ -399,11 +422,11 @@ class LinuxDoReadPosts:
 
                 # 浏览帖子
                 print(f"ℹ️ {self.username}: Starting to read posts...")
-                last_topic_id = await self._read_posts(page, base_topic_id, max_posts)
+                last_topic_id, read_count = await self._read_posts(page, base_topic_id, max_posts)
 
-                print(f"✅ {self.username}: Successfully read {max_posts} posts")
+                print(f"✅ {self.username}: Successfully read {read_count} posts")
                 return True, {
-                    "read_count": max_posts,
+                    "read_count": read_count,
                     "last_topic_id": last_topic_id,
                 }
 
@@ -506,33 +529,44 @@ async def main():
         print(f"📌 Processing: {account['username']}")
         print(f"{'='*50}")
 
-        reader = LinuxDoReadPosts(
-            username=account["username"],
-            password=account["password"],
-        )
+        try:
+            reader = LinuxDoReadPosts(
+                username=account["username"],
+                password=account["password"],
+            )
 
-        start_time = datetime.now()
-        success, result = await reader.run(random.randint(50, 100))
-        end_time = datetime.now()
-        duration = end_time - start_time
+            start_time = datetime.now()
+            success, result = await reader.run(random.randint(50, 100))
+            end_time = datetime.now()
+            duration = end_time - start_time
 
-        # 格式化时长为 HH:MM:SS
-        total_seconds = int(duration.total_seconds())
-        hours, remainder = divmod(total_seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            # 格式化时长为 HH:MM:SS
+            total_seconds = int(duration.total_seconds())
+            hours, remainder = divmod(total_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-        print(f"Result: success={success}, result={result}, duration={duration_str}")
+            print(f"Result: success={success}, result={result}, duration={duration_str}")
 
-        # 记录结果
-        results.append(
-            {
-                "username": account["username"],
-                "success": success,
-                "result": result,
-                "duration": duration_str,
-            }
-        )
+            # 记录结果
+            results.append(
+                {
+                    "username": account["username"],
+                    "success": success,
+                    "result": result,
+                    "duration": duration_str,
+                }
+            )
+        except Exception as e:
+            print(f"❌ {account['username']}: Exception occurred: {e}")
+            results.append(
+                {
+                    "username": account["username"],
+                    "success": False,
+                    "result": {"error": str(e)},
+                    "duration": "00:00:00",
+                }
+            )
 
     # 发送通知
     if results:
