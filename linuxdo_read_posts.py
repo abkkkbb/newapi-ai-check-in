@@ -250,10 +250,11 @@ class LinuxDoReadPosts:
         invalid_count = 0  # 连续无效帖子计数
 
         while read_count < max_posts:
-            # 如果连续无效超过5次，跳过100个ID
+            # 如果连续无效超过5次，跳过50-100个ID
             if invalid_count >= 5:
-                current_topic_id += 100
-                print(f"⚠️ {self.username}: Too many invalid topics, jumping ahead by 100 to {current_topic_id}")
+                jump = random.randint(50, 100)
+                current_topic_id += jump
+                print(f"⚠️ {self.username}: Too many invalid topics, jumping ahead by {jump} to {current_topic_id}")
                 invalid_count = 0
             else:
                 # 随机向上加 1-5
@@ -536,7 +537,7 @@ async def main():
             )
 
             start_time = datetime.now()
-            success, result = await reader.run(random.randint(50, 100))
+            success, result = await reader.run(random.randint(100, 200))
             end_time = datetime.now()
             duration = end_time - start_time
 
