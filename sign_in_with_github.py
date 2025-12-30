@@ -5,10 +5,9 @@
 
 import json
 import os
-from datetime import datetime
 from urllib.parse import urlparse, parse_qs
 from camoufox.async_api import AsyncCamoufox
-from utils.browser_utils import filter_cookies
+from utils.browser_utils import filter_cookies, take_screenshot, save_page_content_to_file
 from utils.config import ProviderConfig
 from utils.wait_for_secrets import WaitForSecrets
 
@@ -33,57 +32,9 @@ class GitHubSignIn:
             password: GitHub 密码
         """
         self.account_name = account_name
-        self.safe_account_name = "".join(c if c.isalnum() else "_" for c in self.account_name)
         self.provider_config = provider_config
         self.username = username
         self.password = password
-
-    async def _take_screenshot(self, page, reason: str) -> None:
-        """截取当前页面的屏幕截图
-
-        Args:
-            page: Camoufox 页面对象
-            reason: 截图原因描述
-        """
-        try:
-            # 创建 screenshots 目录
-            screenshots_dir = "screenshots"
-            os.makedirs(screenshots_dir, exist_ok=True)
-
-            # 生成文件名: 账号名_时间戳_原因.png
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
-            filename = f"{self.safe_account_name}_{timestamp}_{safe_reason}.png"
-            filepath = os.path.join(screenshots_dir, filename)
-
-            await page.screenshot(path=filepath, full_page=True)
-            print(f"📸 {self.account_name}: Screenshot saved to {filepath}")
-        except Exception as e:
-            print(f"⚠️ {self.account_name}: Failed to take screenshot: {e}")
-
-    async def _save_page_content_to_file(self, page, reason: str) -> None:
-        """保存页面 HTML 到日志文件
-
-        Args:
-            page: Camoufox 页面对象
-            reason: 日志原因描述
-        """
-        try:
-            logs_dir = "logs"
-            os.makedirs(logs_dir, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
-            filename = f"{self.safe_account_name}_{timestamp}_github_{safe_reason}.html"
-            filepath = os.path.join(logs_dir, filename)
-
-            html_content = await page.content()
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(html_content)
-
-            print(f"📄 {self.account_name}: Page HTML saved to {filepath}")
-        except Exception as e:
-            print(f"⚠️ {self.account_name}: Failed to save HTML: {e}")
 
     async def signin(
         self,
@@ -144,7 +95,7 @@ class GitHubSignIn:
                         # 直接访问授权页面检查是否已登录
                         response = await page.goto(oauth_url, wait_until="domcontentloaded")
                         print(f"ℹ️ {self.account_name}: redirected to app page {response.url if response else 'N/A'}")
-                        await self._save_page_content_to_file(page, "sign_in_check")
+                        await save_page_content_to_file(page, "sign_in_check", self.account_name, prefix="github")
 
                         # 登录后可能直接跳转回应用页面
                         if response and response.url.startswith(self.provider_config.origin):
@@ -175,7 +126,7 @@ class GitHubSignIn:
                         await page.click('input[type="submit"][value="Sign in"]')
                         await page.wait_for_timeout(10000)
 
-                        await self._save_page_content_to_file(page, "sign_in_result")
+                        await save_page_content_to_file(page, "sign_in_result", self.account_name, prefix="github")
 
                         # 处理账号选择（如果需要）
                         try:
@@ -187,7 +138,7 @@ class GitHubSignIn:
                                     print(f"ℹ️ {self.account_name}: Clicking account selection submit button")
                                     await submit_btn.click()
                                     await page.wait_for_timeout(5000)
-                                    await self._save_page_content_to_file(page, "account_selected")
+                                    await save_page_content_to_file(page, "account_selected", self.account_name, prefix="github")
                                 else:
                                     print(f"⚠️ {self.account_name}: Account selection submit button not found")
                         except Exception as e:
@@ -234,7 +185,7 @@ class GitHubSignIn:
                                     # 自动填充 OTP
                                     print(f"✅ {self.account_name}: Auto-filling OTP code")
                                     await otp_input.fill(otp_code)
-                                    await self._save_page_content_to_file(page, "otp_filled")
+                                    await save_page_content_to_file(page, "otp_filled", self.account_name, prefix="github")
 
                                     # OTP 输入会自动提交
                                     # 先尝试查询非 disabled 的按钮
@@ -272,7 +223,7 @@ class GitHubSignIn:
 
                     except Exception as e:
                         print(f"❌ {self.account_name}: Error occurred while signing in GitHub: {e}")
-                        await self._take_screenshot(page, "github_signin_error")
+                        await take_screenshot(page, "github_signin_error", self.account_name)
                         return False, {"error": "GitHub sign-in error"}
 
                     # 登录后访问授权页面
@@ -296,7 +247,7 @@ class GitHubSignIn:
                                 print(f"ℹ️ {self.account_name}: Approve button not found")
                     except Exception as e:
                         print(f"❌ {self.account_name}: Error occurred while authorization approve: {e}")
-                        await self._take_screenshot(page, "github_auth_approval_failed")
+                        await take_screenshot(page, "github_auth_approval_failed", self.account_name)
                         return False, {"error": "GitHub authorization approval failed"}
 
                 # 统一处理授权逻辑（无论是否通过缓存登录）
@@ -335,7 +286,7 @@ class GitHubSignIn:
                         return True, {"cookies": user_cookies, "api_user": api_user}
                     else:
                         print(f"⚠️ {self.account_name}: OAuth callback received but no user ID found")
-                        await self._take_screenshot(page, "github_oauth_failed_no_user_id")
+                        await take_screenshot(page, "github_oauth_failed_no_user_id", self.account_name)
 
                         parsed_url = urlparse(page.url)
                         query_params = parse_qs(parsed_url.query)
@@ -355,12 +306,12 @@ class GitHubSignIn:
                         f"❌ {self.account_name}: Error occurred during authorization: {e}\n\n"
                         f"Current page is: {page.url}"
                     )
-                    await self._take_screenshot(page, "github_authorization_failed")
+                    await take_screenshot(page, "github_authorization_failed", self.account_name)
                     return False, {"error": "GitHub authorization failed"}
 
             except Exception as e:
                 print(f"❌ {self.account_name}: Error occurred while processing GitHub page: {e}")
-                await self._take_screenshot(page, "github_page_navigation_error")
+                await take_screenshot(page, "github_page_navigation_error", self.account_name)
                 return False, {"error": "GitHub page navigation error"}
             finally:
                 await page.close()

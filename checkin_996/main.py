@@ -18,6 +18,7 @@ from checkin import CheckIn
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.notify import notify
+from utils.balance_hash import load_balance_hash, save_balance_hash
 
 load_dotenv(override=True)
 
@@ -62,26 +63,6 @@ def load_access_tokens() -> list[str] | None:
         return None
 
 
-def load_checkin_hash() -> str | None:
-    """加载签到hash"""
-    try:
-        if os.path.exists(CHECKIN_HASH_FILE):
-            with open(CHECKIN_HASH_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip()
-    except Exception:
-        pass
-    return None
-
-
-def save_checkin_hash(checkin_hash: str) -> None:
-    """保存签到hash"""
-    try:
-        with open(CHECKIN_HASH_FILE, "w", encoding="utf-8") as f:
-            f.write(checkin_hash)
-    except Exception as e:
-        print(f"Warning: Failed to save check-in hash: {e}")
-
-
 def generate_checkin_hash(checkin_results: dict) -> str:
     """生成所有账号签到数据的总hash"""
     if not checkin_results:
@@ -111,7 +92,7 @@ async def main():
     print(f"⚙️ Found {len(tokens)} token(s) to process")
 
     # 加载签到前 hash
-    last_checkin_hash = load_checkin_hash()
+    last_checkin_hash = load_balance_hash(CHECKIN_HASH_FILE)
     if last_checkin_hash:
         print(f"ℹ️ Last check-in hash: {last_checkin_hash}")
     else:
@@ -223,7 +204,7 @@ async def main():
 
     # 保存当前签到 hash
     if current_checkin_hash:
-        save_checkin_hash(current_checkin_hash)
+        save_balance_hash(CHECKIN_HASH_FILE, current_checkin_hash)
 
     # 设置退出码
     sys.exit(0 if success_count > 0 else 1)

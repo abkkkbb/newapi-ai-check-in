@@ -3,7 +3,9 @@
 浏览器自动化相关的公共工具函数
 """
 
+import os
 import random
+from datetime import datetime
 from urllib.parse import urlparse
 
 
@@ -100,3 +102,156 @@ def get_random_user_agent() -> str:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) " "Gecko/20100101 Firefox/134.0",
     ]
     return random.choice(user_agents)
+
+
+async def take_screenshot(
+    page,
+    reason: str,
+    account_name: str,
+    screenshots_dir: str = "screenshots",
+) -> None:
+    """截取当前页面的屏幕截图
+
+    Args:
+        page: Camoufox/Playwright 页面对象
+        reason: 截图原因描述
+        account_name: 账号名称（用于日志输出和文件名）
+        screenshots_dir: 截图保存目录，默认为 "screenshots"
+    """
+    try:
+        os.makedirs(screenshots_dir, exist_ok=True)
+
+        # 自动生成安全的账号名称
+        safe_account_name = "".join(c if c.isalnum() else "_" for c in account_name)
+
+        # 生成文件名: 账号名_时间戳_原因.png
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
+        filename = f"{safe_account_name}_{timestamp}_{safe_reason}.png"
+        filepath = os.path.join(screenshots_dir, filename)
+
+        await page.screenshot(path=filepath, full_page=True)
+        print(f"📸 {account_name}: Screenshot saved to {filepath}")
+    except Exception as e:
+        print(f"⚠️ {account_name}: Failed to take screenshot: {e}")
+
+
+async def save_page_content_to_file(
+    page,
+    reason: str,
+    account_name: str,
+    prefix: str = "",
+    logs_dir: str = "logs",
+) -> None:
+    """保存页面 HTML 到日志文件
+
+    Args:
+        page: Camoufox/Playwright 页面对象
+        reason: 日志原因描述
+        account_name: 账号名称（用于日志输出和文件名）
+        prefix: 文件名前缀（如 "github_", "linuxdo_" 等）
+        logs_dir: 日志保存目录，默认为 "logs"
+    """
+    try:
+        os.makedirs(logs_dir, exist_ok=True)
+
+        # 自动生成安全的账号名称
+        safe_account_name = "".join(c if c.isalnum() else "_" for c in account_name)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
+        
+        # 构建文件名
+        if prefix:
+            filename = f"{safe_account_name}_{timestamp}_{prefix}_{safe_reason}.html"
+        else:
+            filename = f"{safe_account_name}_{timestamp}_{safe_reason}.html"
+        filepath = os.path.join(logs_dir, filename)
+
+        html_content = await page.content()
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(html_content)
+
+        print(f"📄 {account_name}: Page HTML saved to {filepath}")
+    except Exception as e:
+        print(f"⚠️ {account_name}: Failed to save HTML: {e}")
+
+
+async def aliyun_captcha_check(page, account_name: str) -> bool:
+    """阿里云验证码检查和处理
+
+    检查页面是否有阿里云验证码（通过 traceid 检测），如果有则尝试自动滑动验证
+
+    Args:
+        page: Camoufox/Playwright 页面对象
+        account_name: 账号名称（用于日志输出）
+
+    Returns:
+        bool: 验证码处理是否成功（无验证码或验证通过返回 True，验证失败返回 False）
+    """
+    # 检查是否有 traceid (阿里云验证码页面)
+    try:
+        traceid = await page.evaluate(
+            """() => {
+            const traceElement = document.getElementById('traceid');
+            if (traceElement) {
+                const text = traceElement.innerText || traceElement.textContent;
+                const match = text.match(/TraceID:\\s*([a-f0-9]+)/i);
+                return match ? match[1] : null;
+            }
+            return null;
+        }"""
+        )
+
+        if traceid:
+            print(f"⚠️ {account_name}: Aliyun captcha detected, traceid: {traceid}")
+            try:
+                await page.wait_for_selector("#nocaptcha", timeout=60000)
+
+                slider_element = await page.query_selector("#nocaptcha .nc_scale")
+                if slider_element:
+                    slider = await slider_element.bounding_box()
+                    print(f"ℹ️ {account_name}: Slider bounding box: {slider}")
+
+                slider_handle = await page.query_selector("#nocaptcha .btn_slide")
+                if slider_handle:
+                    handle = await slider_handle.bounding_box()
+                    print(f"ℹ️ {account_name}: Slider handle bounding box: {handle}")
+
+                if slider and handle:
+                    await take_screenshot(page, "aliyun_captcha_slider_start", account_name)
+
+                    await page.mouse.move(
+                        handle.get("x") + handle.get("width") / 2,
+                        handle.get("y") + handle.get("height") / 2,
+                    )
+                    await page.mouse.down()
+                    await page.mouse.move(
+                        handle.get("x") + slider.get("width"),
+                        handle.get("y") + handle.get("height") / 2,
+                        steps=2,
+                    )
+                    await page.mouse.up()
+                    await take_screenshot(page, "aliyun_captcha_slider_completed", account_name)
+
+                    # Wait for page to be fully loaded
+                    await page.wait_for_timeout(20000)
+
+                    await take_screenshot(page, "aliyun_captcha_slider_result", account_name)
+                    return True
+                else:
+                    print(f"❌ {account_name}: Slider or handle not found")
+                    await take_screenshot(page, "aliyun_captcha_error", account_name)
+                    return False
+            except Exception as e:
+                print(f"❌ {account_name}: Error occurred while moving slider, {e}")
+                await take_screenshot(page, "aliyun_captcha_error", account_name)
+                return False
+        else:
+            print(f"ℹ️ {account_name}: No traceid found")
+            await take_screenshot(page, "aliyun_captcha_traceid_found", account_name)
+            return True
+    except Exception as e:
+        print(f"❌ {account_name}: Error occurred while getting traceid, {e}")
+        await take_screenshot(page, "aliyun_captcha_error", account_name)
+        return False

@@ -3,12 +3,14 @@
 CheckIn 类 for 996 hub
 """
 
-import json
-import os
-import hashlib
-from datetime import datetime
+import sys
+from pathlib import Path
 
 import httpx
+
+# Add parent directory to Python path to find utils module
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.http_utils import proxy_resolve, response_resolve
 
 
 class CheckIn:
@@ -28,78 +30,7 @@ class CheckIn:
         self.account_name = account_name
         self.safe_account_name = "".join(c if c.isalnum() else "_" for c in account_name)
         self.global_proxy = global_proxy
-        self.http_proxy_config = self._get_http_proxy(global_proxy)
-
-    @staticmethod
-    def _get_http_proxy(proxy_config: dict | None = None) -> httpx.URL | None:
-        """将 proxy_config 转换为 httpx.URL 格式的代理 URL
-
-        Args:
-            proxy_config: 代理配置字典
-
-        Returns:
-            httpx.URL 格式的代理对象，如果没有配置代理则返回 None
-        """
-        if not proxy_config:
-            return None
-
-        proxy_url = proxy_config.get("server")
-        if not proxy_url:
-            return None
-
-        username = proxy_config.get("username")
-        password = proxy_config.get("password")
-
-        if username and password:
-            parsed = httpx.URL(proxy_url)
-            return parsed.copy_with(username=username, password=password)
-
-        return httpx.URL(proxy_url)
-
-    def _check_and_handle_response(self, response: httpx.Response, context: str = "response") -> dict | None:
-        """检查响应类型，如果是 HTML 则保存为文件，否则返回 JSON 数据
-
-        Args:
-            response: httpx Response 对象
-            context: 上下文描述，用于生成文件名
-
-        Returns:
-            JSON 数据字典，如果响应是 HTML 则返回 None
-        """
-        # 创建 logs 目录
-        logs_dir = "logs"
-        os.makedirs(logs_dir, exist_ok=True)
-
-        try:
-            return response.json()
-        except json.JSONDecodeError as e:
-            print(f"❌ {self.account_name}: Failed to parse JSON response: {e}")
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_context = "".join(c if c.isalnum() else "_" for c in context)
-
-            content_type = response.headers.get("content-type", "").lower()
-
-            if "text/html" in content_type or "text/plain" in content_type:
-                filename = f"{self.safe_account_name}_{timestamp}_{safe_context}.html"
-                filepath = os.path.join(logs_dir, filename)
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(response.text)
-
-                print(f"⚠️ {self.account_name}: Received HTML response, saved to: {filepath}")
-            else:
-                filename = f"{self.safe_account_name}_{timestamp}_{safe_context}_invalid.txt"
-                filepath = os.path.join(logs_dir, filename)
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    f.write(response.text)
-
-                print(f"⚠️ {self.account_name}: Invalid response saved to: {filepath}")
-            return None
-        except Exception as e:
-            print(f"❌ {self.account_name}: Error occurred while checking and handling response: {e}")
-            return None
+        self.http_proxy_config = proxy_resolve(global_proxy)
 
     def execute_check_in(self, client: httpx.Client, headers: dict, auth_token: str) -> bool:
         """执行签到请求
@@ -133,7 +64,7 @@ class CheckIn:
 
         # 尝试解析响应（200 或 400 都可能包含有效的 JSON）
         if response.status_code in [200, 400]:
-            json_data = self._check_and_handle_response(response, "execute_check_in")
+            json_data = response_resolve(response, "execute_check_in", self.account_name)
             if json_data is None:
                 print(f"❌ {self.account_name}: Check-in failed - Invalid response format")
                 return False
@@ -188,7 +119,7 @@ class CheckIn:
             print(f"📨 {self.account_name}: Response status code {response.status_code}")
 
             if response.status_code == 200:
-                json_data = self._check_and_handle_response(response, "get_checkin_info")
+                json_data = response_resolve(response, "get_checkin_info", self.account_name)
                 if json_data and json_data.get("success"):
                     data = json_data.get("data", {})
                     print(f"✅ {self.account_name}: Got check-in info")

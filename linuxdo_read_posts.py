@@ -12,6 +12,7 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 from camoufox.async_api import AsyncCamoufox
+from utils.browser_utils import take_screenshot, save_page_content_to_file
 from utils.notify import notify
 
 # 默认缓存目录，与 checkin.py 保持一致
@@ -51,51 +52,6 @@ class LinuxDoReadPosts:
 
         # 每个用户独立的 topic_id 缓存文件
         self.topic_id_cache_file = os.path.join(TOPIC_ID_CACHE_DIR, f"{self.username_hash}_topic_id.txt")
-
-    async def _take_screenshot(self, page, reason: str) -> None:
-        """截取当前页面的屏幕截图
-
-        Args:
-            page: Camoufox 页面对象
-            reason: 截图原因描述
-        """
-        try:
-            screenshots_dir = "screenshots"
-            os.makedirs(screenshots_dir, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
-            filename = f"linuxdo_{self.username_hash}_{timestamp}_{safe_reason}.png"
-            filepath = os.path.join(screenshots_dir, filename)
-
-            await page.screenshot(path=filepath, full_page=True)
-            print(f"📸 {self.username}: Screenshot saved to {filepath}")
-        except Exception as e:
-            print(f"⚠️ {self.username}: Failed to take screenshot: {e}")
-
-    async def _save_page_content_to_file(self, page, reason: str) -> None:
-        """保存页面 HTML 到日志文件
-
-        Args:
-            page: Camoufox 页面对象
-            reason: 日志原因描述
-        """
-        try:
-            logs_dir = "logs"
-            os.makedirs(logs_dir, exist_ok=True)
-
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
-            filename = f"linuxdo_{self.username_hash}_{timestamp}_{safe_reason}.html"
-            filepath = os.path.join(logs_dir, filename)
-
-            html_content = await page.content()
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.write(html_content)
-
-            print(f"📄 {self.username}: Page HTML saved to {filepath}")
-        except Exception as e:
-            print(f"⚠️ {self.username}: Failed to save HTML: {e}")
 
     async def _is_logged_in(self, page) -> bool:
         """检查是否已登录
@@ -157,7 +113,7 @@ class LinuxDoReadPosts:
             await page.click("#login-button")
             await page.wait_for_timeout(10000)
 
-            await self._save_page_content_to_file(page, "login_result")
+            await save_page_content_to_file(page, "login_result", self.username)
 
             # 检查是否遇到 Cloudflare 验证
             current_url = page.url
@@ -179,7 +135,7 @@ class LinuxDoReadPosts:
             current_url = page.url
             if current_url.startswith("https://linux.do/login"):
                 print(f"❌ {self.username}: Login failed, still on login page")
-                await self._take_screenshot(page, "login_failed")
+                await take_screenshot(page, "login_failed", self.username)
                 return False
 
             print(f"✅ {self.username}: Login successful")
@@ -187,7 +143,7 @@ class LinuxDoReadPosts:
 
         except Exception as e:
             print(f"❌ {self.username}: Error during login: {e}")
-            await self._take_screenshot(page, "login_error")
+            await take_screenshot(page, "login_error", self.username)
             return False
 
     def _load_topic_id(self) -> int:
@@ -433,7 +389,7 @@ class LinuxDoReadPosts:
 
             except Exception as e:
                 print(f"❌ {self.username}: Error occurred: {e}")
-                await self._take_screenshot(page, "error")
+                await take_screenshot(page, "error", self.username)
                 return False, {"error": str(e)}
             finally:
                 await page.close()

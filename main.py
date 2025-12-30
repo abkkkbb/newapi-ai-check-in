@@ -6,140 +6,17 @@
 import asyncio
 import hashlib
 import json
-import os
 import sys
 from datetime import datetime
 from dotenv import load_dotenv
-from utils.config import AppConfig, AccountConfig
+from utils.config import AppConfig
 from utils.notify import notify
+from utils.balance_hash import load_balance_hash, save_balance_hash
 from checkin import CheckIn
 
 load_dotenv(override=True)
 
 BALANCE_HASH_FILE = "balance_hash.txt"
-
-
-def load_accounts() -> list[AccountConfig] | None:
-    """从环境变量加载多账号配置"""
-    accounts_str = os.getenv("ACCOUNTS")
-    if not accounts_str:
-        print("❌ ACCOUNTS environment variable not found")
-        return None
-
-    try:
-        accounts_data = json.loads(accounts_str)
-
-        # 检查是否为数组格式
-        if not isinstance(accounts_data, list):
-            print("❌ Account configuration must use array format [{}]")
-            return None
-
-        accounts = []
-        # 验证账号数据格式
-        for i, account in enumerate(accounts_data):
-            if not isinstance(account, dict):
-                print(f"❌ Account {i + 1} configuration format is incorrect")
-                return None
-
-            # 检查必须有 linux.do、github 或 cookies 配置
-            has_linux_do = "linux.do" in account
-            has_github = "github" in account
-            has_cookies = "cookies" in account
-
-            if not has_linux_do and not has_github and not has_cookies:
-                print(f"❌ Account {i + 1} must have either 'linux.do', 'github', or 'cookies' " f"configuration")
-                return None
-
-                # 确保必要字段存在后再创建 AccountConfig
-            if has_cookies:
-                if not account.get("cookies"):
-                    print(f"❌ Account {i + 1} cookies cannot be empty")
-                    return None
-                if not account.get("api_user"):
-                    print(f"❌ Account {i + 1} api_user cannot be empty")
-                    return None
-
-            # 验证 linux.do 配置
-            if has_linux_do:
-                auth_config = account["linux.do"]
-                if not isinstance(auth_config, dict):
-                    print(f"❌ Account {i + 1} linux.do configuration must be a " f"dictionary")
-                    return None
-
-                # 验证必需字段
-                if "username" not in auth_config or "password" not in auth_config:
-                    print(f"❌ Account {i + 1} linux.do configuration must contain username and password")
-                    return None
-
-                # 验证字段不为空
-                if not auth_config["username"] or not auth_config["password"]:
-                    print(f"❌ Account {i + 1} linux.do username and password cannot be empty")
-                    return None
-
-            # 验证 github 配置
-            if has_github:
-                auth_config = account["github"]
-                if not isinstance(auth_config, dict):
-                    print(f"❌ Account {i + 1} github configuration must be a dictionary")
-                    return None
-
-                # 验证必需字段
-                if "username" not in auth_config or "password" not in auth_config:
-                    print(f"❌ Account {i + 1} github configuration must contain username and password")
-                    return None
-
-                # 验证字段不为空
-                if not auth_config["username"] or not auth_config["password"]:
-                    print(f"❌ Account {i + 1} github username and password cannot be empty")
-                    return None
-
-            # 验证 cookies 配置
-            if has_cookies:
-                cookies_config = account["cookies"]
-                if not cookies_config:
-                    print(f"❌ Account {i + 1} cookies cannot be empty")
-                    return None
-
-                # 验证必须要有 api_user 字段
-                if "api_user" not in account:
-                    print(f"❌ Account {i + 1} with cookies must have api_user field")
-                    return None
-
-                if not account["api_user"]:
-                    print(f"❌ Account {i + 1} api_user cannot be empty")
-                    return None
-
-            # 如果有 name 字段,确保它不是空字符串
-            if "name" in account and not account["name"]:
-                print(f"❌ Account {i + 1} name field cannot be empty")
-                return None
-
-            accounts.append(AccountConfig.from_dict(account, i))
-
-        return accounts
-    except Exception as e:
-        print(f"❌ Account configuration format is incorrect: {e}")
-        return None
-
-
-def load_balance_hash() -> str | None:
-    """加载余额hash"""
-    try:
-        if os.path.exists(BALANCE_HASH_FILE):
-            with open(BALANCE_HASH_FILE, "r", encoding="utf-8") as f:
-                return f.read().strip()
-    except Exception:
-        pass
-    return None
-
-
-def save_balance_hash(balance_hash: str) -> None:
-    """保存余额hash"""
-    try:
-        with open(BALANCE_HASH_FILE, "w", encoding="utf-8") as f:
-            f.write(balance_hash)
-    except Exception as e:
-        print(f"Warning: Failed to save balance hash: {e}")
 
 
 def generate_balance_hash(balances: dict) -> str:
@@ -170,29 +47,15 @@ async def main():
     app_config = AppConfig.load_from_env()
     print(f"⚙️ Loaded {len(app_config.providers)} provider(s)")
 
-    # 加载全局代理配置
-    global_proxy = None
-    proxy_str = os.getenv("PROXY")
-    if proxy_str:
-        try:
-            # 尝试解析为 JSON
-            global_proxy = json.loads(proxy_str)
-            print("⚙️ Global proxy loaded from PROXY environment variable (dict format)")
-        except json.JSONDecodeError:
-            # 如果不是 JSON，则视为字符串
-            global_proxy = {"server": proxy_str}
-            print(f"⚙️ Global proxy loaded from PROXY environment variable: {proxy_str}")
-
-    # 加载账号配置
-    accounts = load_accounts()
-    if not accounts:
+    # 检查账号配置
+    if not app_config.accounts:
         print("❌ Unable to load account configuration, program exits")
         return 1
-
-    print(f"⚙️ Found {len(accounts)} account(s)")
+    
+    print(f"⚙️ Found {len(app_config.accounts)} account(s)")
 
     # 加载余额hash
-    last_balance_hash = load_balance_hash()
+    last_balance_hash = load_balance_hash(BALANCE_HASH_FILE)
 
     # 为每个账号执行签到
     success_count = 0
@@ -201,7 +64,7 @@ async def main():
     current_balances = {}
     need_notify = False  # 是否需要发送通知
 
-    for i, account_config in enumerate(accounts):
+    for i, account_config in enumerate(app_config.accounts):
         account_key = f"account_{i + 1}"
         account_name = account_config.get_display_name(i)
         if len(notification_content) > 0:
@@ -218,7 +81,7 @@ async def main():
                 continue
 
             print(f"🌀 Processing {account_name} using provider '{account_config.provider}'")
-            checkin = CheckIn(account_name, account_config, provider_config, global_proxy=global_proxy)
+            checkin = CheckIn(account_name, account_config, provider_config, global_proxy=app_config.global_proxy)
             results = await checkin.execute()
 
             total_count += len(results)
@@ -299,7 +162,7 @@ async def main():
 
     # 保存当前余额hash
     if current_balance_hash:
-        save_balance_hash(current_balance_hash)
+        save_balance_hash(BALANCE_HASH_FILE, current_balance_hash)
 
     if need_notify and notification_content:
         # 构建通知内容
