@@ -493,7 +493,7 @@ async def main():
             )
 
             start_time = datetime.now()
-            success, result = await reader.run(random.randint(100, 200))
+            success, result = await reader.run(random.randint(200, 300))
             end_time = datetime.now()
             duration = end_time - start_time
 
