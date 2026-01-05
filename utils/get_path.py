@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-签名生成模块
+签到路径生成模块
+
+提供各种签到接口的 URL 生成函数
 """
 
 import hmac
@@ -41,13 +43,13 @@ def generate_aiai_li_checkin_signature(
     return timestamp, signature
 
 
-def aiai_li_sign_in_url(
+def get_aiai_li_check_in_path(
     origin: str,
     user_id: str | int,
     timezone: str = "Asia/Shanghai",
 ) -> str:
     """
-    生成带签名的签到 URL
+    生成带签名的签到 URL (aiai.li)
 
     Args:
         origin: 站点域名 (如 "https://aiai.li")

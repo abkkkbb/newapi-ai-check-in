@@ -3,36 +3,57 @@
 Topup 工具函数 - 简单封装充值功能
 """
 
-import httpx
+from __future__ import annotations
 
-from utils.http_utils import response_resolve
+from typing import TYPE_CHECKING
+
+from curl_cffi import requests as curl_requests
+
+from utils.http_utils import proxy_resolve, response_resolve
+
+if TYPE_CHECKING:
+    from utils.config import AccountConfig, ProviderConfig
 
 
 def topup(
-    account_name: str,
-    topup_url: str,
+    provider_config: "ProviderConfig",
+    account_config: "AccountConfig",
     headers: dict,
     cookies: dict,
     key: str,
-    proxy: httpx.URL | None = None,
+    impersonate: str = "firefox135",
 ) -> dict:
     """执行充值请求
 
     Args:
-        account_name: 账号名称（用于日志）
-        topup_url: 充值 API URL
+        provider_config: Provider 配置
+        account_config: 账号配置
         headers: 请求头
         cookies: cookies 字典
         key: 充值密钥
-        proxy: 代理配置（可选）
+        impersonate: curl_cffi 浏览器指纹模拟，默认为 "firefox135"
 
     Returns:
         包含 success 和 message 或 error 的字典
     """
-    client = httpx.Client(http2=True, timeout=30.0, proxy=proxy)
+    account_name = account_config.get_display_name()
+    # 代理优先级: 账号配置 > 全局配置
+    proxy_config = account_config.proxy or account_config.get("global_proxy")
+    http_proxy = proxy_resolve(proxy_config)
+    
+    # 获取 topup URL
+    topup_url = provider_config.get_topup_url()
+    if not topup_url:
+        print(f"❌ {account_name}: No topup URL configured")
+        return {
+            "success": False,
+            "error": "No topup URL configured",
+        }
+    
+    session = curl_requests.Session(impersonate=impersonate, proxy=http_proxy, timeout=30)
     try:
         # 设置 cookies
-        client.cookies.update(cookies)
+        session.cookies.update(cookies)
 
         # 构建 topup 请求头
         topup_headers = headers.copy()
@@ -42,7 +63,7 @@ def topup(
             "Pragma": "no-cache",
         })
 
-        response = client.post(
+        response = session.post(
             topup_url,
             headers=topup_headers,
             json={"key": key},
@@ -94,4 +115,4 @@ def topup(
             "error": f"Topup failed: {e}(key: {key})",
         }
     finally:
-        client.close()
+        session.close()

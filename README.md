@@ -12,7 +12,7 @@ Affs:
 - [莹のAPI](https://api.wpgzs.top/register?aff=56zr)
 - [KFC API](https://kfc-api.sxxe.net/register?aff=xPnf)
 
-其它使用 `newapi.ai` 功能相似, 可自定义 `provider` 支持。
+其它使用 `newapi.ai` 功能相似, 可自定义环境变量 `PROVIDERS` 支持或 `PR` 到仓库。
 
 ## 功能特性
 
@@ -39,7 +39,7 @@ Affs:
    - Value: 你的多账号配置数据
 
 ### 3. 多账号配置格式
-> 如果未提供 `name` 字段，会使用 `Account 1`、`Account 2` 等默认名称。  
+> 如果未提供 `name` 字段，会使用 `{provider.name} 1`、`{provider.name} 2` 等默认名称。  
 > 配置中 `cookies`、`github`、`linux.do` 必须至少配置 1 个。   
 > 使用 `cookies` 设置时，`api_user` 字段必填。
 
@@ -72,10 +72,14 @@ Affs:
         "username": "user2",
         "password": "pass2",
       },
-      // 额外的配置说明
-      "access_token": "provider: x666 必须配置, 来自 https://qd.x666.me/"
-      "fuli_cookies": {
-        "session": "provider: runtimeaway 必须配置， 来自 https://fuli.hxi.me/"
+      // --- 额外的配置说明 ---
+      //provider: x666 必须配置
+      "access_token": "来自 https://qd.x666.me/",
+      "get_cdk_cookies": {
+        // provider: runawaytime 必须配置
+        "session": "来自 https://fuli.hxi.me/",
+        // provider: b4u 必须配置
+        "__Secure-authjs.session-token": "来自 https://tw.b4u.qzz.io/"
       }
     }
   ]
@@ -84,7 +88,7 @@ Affs:
 #### 字段说明：
 
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
-- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、 `x666`, `runawaytime` `aiai.li`, 默认使用 `anyrouter`
+- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`aiai.li`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`，默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
 - `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数

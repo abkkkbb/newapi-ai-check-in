@@ -3,7 +3,7 @@ import smtplib
 from email.mime.text import MIMEText
 from typing import Literal
 
-import httpx
+from curl_cffi import requests as curl_requests
 
 
 class NotificationKit:
@@ -39,24 +39,21 @@ class NotificationKit:
 			raise ValueError('PushPlus Token not configured')
 
 		data = {'token': self.pushplus_token, 'title': title, 'content': content, 'template': 'html'}
-		with httpx.Client(timeout=30.0) as client:
-			client.post('http://www.pushplus.plus/send', json=data)
+		curl_requests.post('http://www.pushplus.plus/send', json=data, timeout=30)
 
 	def send_serverPush(self, title: str, content: str):
 		if not self.server_push_key:
 			raise ValueError('Server Push key not configured')
 
 		data = {'title': title, 'desp': content}
-		with httpx.Client(timeout=30.0) as client:
-			client.post(f'https://sctapi.ftqq.com/{self.server_push_key}.send', json=data)
+		curl_requests.post(f'https://sctapi.ftqq.com/{self.server_push_key}.send', json=data, timeout=30)
 
 	def send_dingtalk(self, title: str, content: str):
 		if not self.dingding_webhook:
 			raise ValueError('DingTalk Webhook not configured')
 
 		data = {'msgtype': 'text', 'text': {'content': f'{title}\n{content}'}}
-		with httpx.Client(timeout=30.0) as client:
-			client.post(self.dingding_webhook, json=data)
+		curl_requests.post(self.dingding_webhook, json=data, timeout=30)
 
 	def send_feishu(self, title: str, content: str):
 		if not self.feishu_webhook:
@@ -69,16 +66,14 @@ class NotificationKit:
 				'header': {'template': 'blue', 'title': {'content': title, 'tag': 'plain_text'}},
 			},
 		}
-		with httpx.Client(timeout=30.0) as client:
-			client.post(self.feishu_webhook, json=data)
+		curl_requests.post(self.feishu_webhook, json=data, timeout=30)
 
 	def send_wecom(self, title: str, content: str):
 		if not self.weixin_webhook:
 			raise ValueError('WeChat Work Webhook not configured')
 
 		data = {'msgtype': 'text', 'text': {'content': f'{title}\n{content}'}}
-		with httpx.Client(timeout=30.0) as client:
-			client.post(self.weixin_webhook, json=data)
+		curl_requests.post(self.weixin_webhook, json=data, timeout=30)
 
 	def push_message(self, title: str, content: str, msg_type: Literal['text', 'html'] = 'text'):
 		notifications = [

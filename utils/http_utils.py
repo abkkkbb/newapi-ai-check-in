@@ -6,18 +6,19 @@
 import json
 import os
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 
-import httpx
+from curl_cffi import requests as curl_requests
 
 
-def proxy_resolve(proxy_config: dict | None = None) -> httpx.URL | None:
-    """将 proxy_config 转换为 httpx.URL 格式的代理 URL
+def proxy_resolve(proxy_config: dict | None = None) -> str | None:
+    """将 proxy_config 转换为代理 URL 字符串
 
     Args:
         proxy_config: 代理配置字典
 
     Returns:
-        httpx.URL 格式的代理对象，如果没有配置代理则返回 None
+        代理 URL 字符串，如果没有配置代理则返回 None
     """
     if not proxy_config:
         return None
@@ -30,21 +31,26 @@ def proxy_resolve(proxy_config: dict | None = None) -> httpx.URL | None:
     password = proxy_config.get("password")
 
     if username and password:
-        parsed = httpx.URL(proxy_url)
-        return parsed.copy_with(username=username, password=password)
+        # 解析 URL 并添加认证信息
+        parsed = urlparse(proxy_url)
+        # 构建带认证的 URL
+        netloc = f"{username}:{password}@{parsed.hostname}"
+        if parsed.port:
+            netloc += f":{parsed.port}"
+        return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
 
-    return httpx.URL(proxy_url)
+    return proxy_url
 
 
 def response_resolve(
-    response: httpx.Response,
+    response: curl_requests.Response,
     context: str,
     account_name: str,
 ) -> dict | None:
     """检查响应类型，如果是 HTML 则保存为文件，否则返回 JSON 数据
 
     Args:
-        response: httpx Response 对象
+        response: curl_cffi Response 对象
         context: 上下文描述，用于生成文件名
         account_name: 账号名称（用于日志和文件名）
 

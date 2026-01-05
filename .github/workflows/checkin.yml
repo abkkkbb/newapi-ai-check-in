@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: '0 */8 * * *'
   workflow_dispatch:
+    inputs:
+      accounts:
+        description: '账号配置 (JSON 格式，可选，不填则使用 secrets.ACCOUNTS)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   checkin:
@@ -90,7 +96,7 @@ jobs:
             
     - name: 执行签到
       env:
-        ACCOUNTS: ${{ secrets.ACCOUNTS }}
+        ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
         PROVIDERS: ${{ secrets.PROVIDERS }}
         PROXY: ${{secrets.PROXY}}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}

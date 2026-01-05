@@ -6,20 +6,31 @@
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Generator, List, Literal
+from typing import Callable, Dict, Generator, AsyncGenerator, List, Literal
 
-from utils.signature import aiai_li_sign_in_url
+from utils.get_path import get_aiai_li_check_in_path
+from utils.get_check_in_status import newapi_check_in_status
 from utils.get_cdk import (
-    get_runawaytime_checkin_cdk,
-    get_runawaytime_wheel_cdk,
+    get_runawaytime_cdk,
     get_x666_cdk,
+    get_b4u_cdk,
 )
 
 
 # 前向声明 AccountConfig 类型，用于类型注解
 # 实际的 AccountConfig 类在后面定义
-# 定义 CDK 获取函数的类型：接收 AccountConfig 参数，返回 str | List[str] | None
-CdkGetterFunc = Callable[["AccountConfig"], str | List[str] | None]
+# 定义 CDK 获取函数的类型：接收 AccountConfig 参数，返回 Generator[str, None, None]
+CdkGetterFunc = Callable[["AccountConfig"], Generator[str, None, None]]
+AsyncCdkGetterFunc = Callable[["AccountConfig"], AsyncGenerator[str, None]]
+
+# 签到状态查询函数类型：接收 ProviderConfig 和 AccountConfig 参数，返回 bool（今日是否已签到）
+# 函数签名: (provider_config, account_config, cookies, headers) -> bool
+# 代理配置从 account_config.proxy 或 account_config.get("global_proxy") 获取
+# headers 中已包含 api_user_key，无需单独传递 api_user
+CheckInStatusFunc = Callable[
+    ["ProviderConfig", "AccountConfig", dict, dict],
+    bool
+]
 
 
 @dataclass
@@ -31,17 +42,20 @@ class ProviderConfig:
     login_path: str = "/login"
     status_path: str = "/api/status"
     auth_state_path: str = "api/oauth/state"
-    sign_in_path: str | Callable[[str, str | int], str] | None = "/api/user/sign_in"
+    check_in_path: str | Callable[[str, str | int], str] | None = None
+    check_in_status: CheckInStatusFunc | None = None  # 签到状态查询函数，返回 bool
     user_info_path: str = "/api/user/self"
     topup_path: str | None = "/api/user/topup"
-    get_cdk: CdkGetterFunc | List[CdkGetterFunc] | None = None
+    get_cdk: CdkGetterFunc | AsyncCdkGetterFunc | None = None
     api_user_key: str = "new-api-user"
     github_client_id: str | None = None
-    github_auth_path: str = "/api/oauth/github",
+    github_auth_path: str = "/api/oauth/github"
+    github_auth_redirect_path: str = "/oauth/**"  # OAuth 回调路径匹配模式，支持通配符
     linuxdo_client_id: str | None = None
-    linuxdo_auth_path: str = "/api/oauth/lunuxdo",
+    linuxdo_auth_path: str = "/api/oauth/linuxdo"
+    linuxdo_auth_redirect_path: str = "/oauth/**"  # OAuth 回调路径匹配模式，支持通配符
     aliyun_captcha: bool = False
-    bypass_method: Literal["waf_cookies"] | None = None
+    bypass_method: Literal["waf_cookies", "cf_clearance"] | None = None
 
     @classmethod
     def from_dict(cls, name: str, data: dict) -> "ProviderConfig":
@@ -57,15 +71,18 @@ class ProviderConfig:
             login_path=data.get("login_path", "/login"),
             status_path=data.get("status_path", "/api/status"),
             auth_state_path=data.get("auth_state_path", "api/oauth/state"),
-            sign_in_path=data.get("sign_in_path", "/api/user/sign_in"),
+            check_in_path=data.get("check_in_path"),
+            check_in_status=data.get("check_in_status"),  # 函数类型无法从 JSON 解析，需要代码中设置
             user_info_path=data.get("user_info_path", "/api/user/self"),
             topup_path=data.get("topup_path", "/api/user/topup"),
             get_cdk=data.get("get_cdk"),  # 函数类型无法从 JSON 解析，需要代码中设置
             api_user_key=data.get("api_user_key", "new-api-user"),
             github_client_id=data.get("github_client_id"),
             github_auth_path=data.get("github_auth_path", "/api/oauth/github"),
+            github_auth_redirect_path=data.get("github_auth_redirect_path", "/oauth/**"),
             linuxdo_client_id=data.get("linuxdo_client_id"),
             linuxdo_auth_path=data.get("linuxdo_auth_path", "/api/oauth/linuxdo"),
+            linuxdo_auth_redirect_path=data.get("linuxdo_auth_redirect_path", "/oauth/**"),
             aliyun_captcha=data.get("aliyun_captcha", False),
             bypass_method=data.get("bypass_method"),
         )
@@ -74,9 +91,13 @@ class ProviderConfig:
         """判断是否需要获取 WAF cookies"""
         return self.bypass_method == "waf_cookies"
 
+    def needs_cf_clearance(self) -> bool:
+        """判断是否需要获取 Cloudflare cf_clearance cookie"""
+        return self.bypass_method == "cf_clearance"
+
     def needs_manual_check_in(self) -> bool:
         """判断是否需要手动调用签到接口"""
-        return self.sign_in_path is not None
+        return self.check_in_path is not None
 
     def needs_manual_topup(self) -> bool:
         """判断是否需要手动执行充值（通过 CDK）
@@ -97,10 +118,10 @@ class ProviderConfig:
         """获取认证状态 URL"""
         return f"{self.origin}{self.auth_state_path}"
 
-    def get_sign_in_url(self, user_id: str | int) -> str | None:
+    def get_check_in_url(self, user_id: str | int) -> str | None:
         """获取签到 URL
 
-        如果 sign_in_path 是函数，则调用函数生成带签名的 URL
+        如果 check_in_path 是函数，则调用函数生成带签名的 URL
 
         Args:
             user_id: 用户 ID
@@ -108,15 +129,19 @@ class ProviderConfig:
         Returns:
             str | None: 签到 URL，如果不需要签到则返回 None
         """
-        if not self.sign_in_path:
+        if not self.check_in_path:
             return None
 
         # 如果是函数，则调用函数生成 URL
-        if callable(self.sign_in_path):
-            return self.sign_in_path(self.origin, user_id)
+        if callable(self.check_in_path):
+            return self.check_in_path(self.origin, user_id)
 
         # 否则拼接路径
-        return f"{self.origin}{self.sign_in_path}"
+        return f"{self.origin}{self.check_in_path}"
+
+    def has_check_in_status(self) -> bool:
+        """判断是否配置了签到状态查询函数"""
+        return self.check_in_status is not None
 
     def get_user_info_url(self) -> str:
         """获取用户信息 URL"""
@@ -131,47 +156,26 @@ class ProviderConfig:
     def get_github_auth_url(self) -> str:
         """获取 GitHub 认证 URL"""
         return f"{self.origin}{self.github_auth_path}"
-    
+
+    def get_github_auth_redirect_pattern(self) -> str:
+        """获取 GitHub OAuth 回调 URL 匹配模式
+        
+        返回用于 page.wait_for_url() 的匹配模式，支持通配符 **
+        例如: "**https://example.com/oauth/**" 或 "**https://example.com/oauth-redirect.html**"
+        """
+        return f"**{self.origin}{self.github_auth_redirect_path}"
+
     def get_linuxdo_auth_url(self) -> str:
         """获取 LinuxDo 认证 URL"""
         return f"{self.origin}{self.linuxdo_auth_path}"
 
-    def iter_get_cdk(self, account_config: "AccountConfig") -> Generator[List[str], None, None]:
-        """迭代获取 CDK（生成器方式）
+    def get_linuxdo_auth_redirect_pattern(self) -> str:
+        """获取 LinuxDo OAuth 回调 URL 匹配模式
         
-        每次调用一个 get_cdk 函数，将结果统一转换为 list[str] 后 yield 返回
-        适用于需要分步执行每个 get_cdk 函数的场景
-        
-        Args:
-            account_config: 账号配置对象
-        
-        Yields:
-            List[str]: CDK 字符串列表（每次 yield 一个 get_cdk 函数的结果）
+        返回用于 page.wait_for_url() 的匹配模式，支持通配符 **
+        例如: "**https://example.com/oauth/**" 或 "**https://example.com/oauth-redirect.html**"
         """
-        if not self.get_cdk:
-            return
-        
-        # 如果是单个函数
-        if callable(self.get_cdk):
-            result = self.get_cdk(account_config)
-            if result:
-                if isinstance(result, list):
-                    yield result
-                else:
-                    yield [result]
-            return
-        
-        # 如果是函数数组，依次调用每个函数
-        if isinstance(self.get_cdk, list):
-            for func in self.get_cdk:
-                if callable(func):
-                    result = func(account_config)
-                    if result:
-                        if isinstance(result, list):
-                            yield result
-                        else:
-                            yield [result]
-
+        return f"**{self.origin}{self.linuxdo_auth_redirect_path}"
 
 @dataclass
 class AccountConfig:
@@ -187,10 +191,10 @@ class AccountConfig:
     extra: dict = field(default_factory=dict)  # 存储额外的配置字段
 
     @classmethod
-    def from_dict(cls, data: dict, index: int) -> "AccountConfig":
+    def from_dict(cls, data: dict) -> "AccountConfig":
         """从字典创建 AccountConfig"""
         provider = data.get("provider", "anyrouter")
-        name = data.get("name", f"Account {index + 1}")
+        name = data.get("name")
 
         # Handle different authentication types
         cookies = data.get("cookies", "")
@@ -215,8 +219,11 @@ class AccountConfig:
         )
 
     def get_display_name(self, index: int = 0) -> str:
-        """获取显示名称"""
-        return self.name if self.name else f"Account {index + 1}"
+        """获取显示名称
+        
+        如果设置了 name 则返回 name，否则返回 "{provider} {index + 1}"
+        """
+        return self.name if self.name else f"{self.provider} {index + 1}"
 
     def get(self, key: str, default=None):
         """获取配置值，优先从已知属性获取，否则从 extra 中获取"""
@@ -301,7 +308,8 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path="/api/user/sign_in",
+                check_in_path="/api/user/sign_in",
+                check_in_status=None,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -318,7 +326,8 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path=None,  # 无需签到接口，查询用户信息时自动完成签到
+                check_in_path=None,  # 无需签到接口，查询用户信息时自动完成签到
+                check_in_status=None,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -335,7 +344,8 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path="/api/user/checkin",
+                check_in_path="/api/user/checkin",
+                check_in_status=None,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -352,7 +362,8 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path=aiai_li_sign_in_url,
+                check_in_path=get_aiai_li_check_in_path,
+                check_in_status=None,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -369,10 +380,11 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path="/api/user/check_in",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
-                api_user_key="veloera-user",
+                api_user_key="new-api-user",
                 github_client_id=None,
                 github_auth_path=None,
                 linuxdo_client_id="FNvJFnlfpfDM2mKDp8HTElASdjEwUriS",
@@ -386,17 +398,18 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path=None,  # 签到通过 fuli.hxi.me 完成
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
-                get_cdk=[get_runawaytime_checkin_cdk, get_runawaytime_wheel_cdk],
+                get_cdk=get_runawaytime_cdk,
                 api_user_key="new-api-user",
                 github_client_id=None,
                 github_auth_path=None,
                 linuxdo_client_id="AHjK9O3FfbCXKpF6VXGBC60K21yJ2fYk",
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
-                bypass_method=None,
+                bypass_method="cf_clearance",
             ),
             "x666": ProviderConfig(
                 name="x666",
@@ -404,7 +417,8 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                sign_in_path=None,  # 签到通过 qd.x666.me 完成
+                check_in_path=None,  # 签到通过 qd.x666.me 完成
+                check_in_status=None,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=get_x666_cdk,
@@ -415,6 +429,103 @@ class AppConfig:
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method=None,
+            ),
+            "kfc": ProviderConfig(
+                name="kfc",
+                origin="https://kfc-api.sxxe.net",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="UZgHjwXCE3HTrsNMjjEi0d8wpcj7d4Of",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
+            "neb": ProviderConfig(
+                name="neb",
+                origin="https://ai.zzhdsgsss.xyz",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="ZflEL6xK90fbCcuWpHEKAcofgK8B5msn",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
+            "elysiver": ProviderConfig(
+                name="elysiver",
+                origin="https://elysiver.h-e.top",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                github_auth_redirect_path="/oauth-redirect.html**",  # 使用 oauth-redirect.html 页面
+                linuxdo_client_id="E2eaCQVl9iecd4aJBeTKedXfeKiJpSPF",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                linuxdo_auth_redirect_path="/oauth-redirect.html**",  # 使用 oauth-redirect.html 页面
+                aliyun_captcha=False,
+                bypass_method="cf_clearance",
+            ),
+            "hotaru": ProviderConfig(
+                name="hotaru",
+                origin="https://api.hotaruapi.top",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="qVGkHnU8fLzJVEMgHCuNUCYifUQwePWn",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method="cf_clearance",
+            ),
+            "b4u": ProviderConfig(
+                name="b4u",
+                origin="https://b4u.qzz.io",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path=None,  # 无签到接口，通过 luckydraw 获取 CDK 并 topup
+                check_in_status=None,
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=get_b4u_cdk,  # 通过 tw.b4u.qzz.io/luckydraw 抽奖获取 CDK
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="Cf3PtT3ecj4kzJrMvOGM48FrHFKYXusb",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method="cf_clearance",
             ),
         }
 
@@ -443,7 +554,7 @@ class AppConfig:
             except Exception as e:
                 print(f"⚠️ Error loading {providers_env}: {e}, using default configuration only")
         else:
-            print(f"❌ {providers_env} environment variable not found")
+            print(f"⚠️ {providers_env} environment variable not found, using default configuration only")
 
         return providers
 
@@ -462,7 +573,7 @@ class AppConfig:
         accounts_str = os.getenv(accounts_env)
         
         if not accounts_str:
-            print(f"❌ {accounts_env} environment variable not found")
+            print(f"⚠️ {accounts_env} environment variable not found")
             return []
 
         try:
@@ -553,7 +664,7 @@ class AppConfig:
                     print(f"❌ Account {i + 1} name field cannot be empty")
                     return []
 
-                accounts.append(AccountConfig.from_dict(account, i))
+                accounts.append(AccountConfig.from_dict(account))
 
             return accounts
         except json.JSONDecodeError as e:

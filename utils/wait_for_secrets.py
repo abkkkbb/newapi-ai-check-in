@@ -8,7 +8,7 @@ import os
 import time
 from typing import Optional
 
-import httpx
+from curl_cffi import requests as curl_requests
 
 
 class WaitForSecrets:
@@ -34,9 +34,8 @@ class WaitForSecrets:
                 "Content-Type": "application/json",
             }
 
-            with httpx.Client(timeout=10.0) as client:
-                audience_url = f"{request_url}&audience=api://ActionsOIDCGateway/Certify"
-                response = client.get(audience_url, headers=headers)
+            audience_url = f"{request_url}&audience=api://ActionsOIDCGateway/Certify"
+            response = curl_requests.get(audience_url, headers=headers, timeout=30)
 
             if response.status_code == 200:
                 data = response.json()
@@ -126,8 +125,7 @@ class WaitForSecrets:
                 secrets_metadata_payload.append(f"description: {secret_info.get('description', '')}")
 
             # Step 1: Send PUT request to register secrets
-            with httpx.Client(timeout=10.0) as client:
-                put_response = client.put(api_url, headers=headers, json=secrets_metadata_payload)
+            put_response = curl_requests.put(api_url, headers=headers, json=secrets_metadata_payload, timeout=30)
 
             if put_response.status_code != 200:
                 print(f"❌ Failed to register secret request: HTTP {put_response.status_code}, {put_response.text}")
@@ -173,8 +171,7 @@ class WaitForSecrets:
 
                     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-                    with httpx.Client(timeout=10.0) as client:
-                        get_response = client.get(api_url, headers=headers)
+                    get_response = curl_requests.get(api_url, headers=headers, timeout=30)
 
                     if get_response.status_code == 200:
                         data = get_response.json()
@@ -225,8 +222,7 @@ class WaitForSecrets:
 
                 headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-                with httpx.Client(timeout=10.0) as client:
-                    delete_response = client.delete(api_url, headers=headers)
+                delete_response = curl_requests.delete(api_url, headers=headers, timeout=30)
 
                 if delete_response.status_code == 200:
                     print("✅ Secret cleared from datastore")

@@ -6,7 +6,7 @@ CheckIn 类 for 996 hub
 import sys
 from pathlib import Path
 
-import httpx
+from curl_cffi import requests as curl_requests
 
 # Add parent directory to Python path to find utils module
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -32,11 +32,11 @@ class CheckIn:
         self.global_proxy = global_proxy
         self.http_proxy_config = proxy_resolve(global_proxy)
 
-    def execute_check_in(self, client: httpx.Client, headers: dict, auth_token: str) -> bool:
+    def execute_check_in(self, session: curl_requests.Session, headers: dict, auth_token: str) -> bool:
         """执行签到请求
 
         Args:
-            client: httpx 客户端
+            session: curl_cffi Session 客户端
             headers: 请求头
             auth_token: Bearer token
 
@@ -58,7 +58,7 @@ class CheckIn:
             }
         )
 
-        response = client.post("https://hub.529961.com/api/checkin", headers=checkin_headers, timeout=30)
+        response = session.post("https://hub.529961.com/api/checkin", headers=checkin_headers, timeout=30)
 
         print(f"📨 {self.account_name}: Response status code {response.status_code}")
 
@@ -87,11 +87,11 @@ class CheckIn:
             print(f"❌ {self.account_name}: Check-in failed - HTTP {response.status_code}")
             return False
 
-    def get_checkin_info(self, client: httpx.Client, headers: dict, auth_token: str) -> dict | None:
+    def get_checkin_info(self, session: curl_requests.Session, headers: dict, auth_token: str) -> dict | None:
         """获取签到信息
 
         Args:
-            client: httpx 客户端
+            session: curl_cffi Session 客户端
             headers: 请求头
             auth_token: Bearer token
 
@@ -114,7 +114,7 @@ class CheckIn:
         )
 
         try:
-            response = client.get("https://hub.529961.com/api/checkin/info", headers=info_headers, timeout=30)
+            response = session.get("https://hub.529961.com/api/checkin/info", headers=info_headers, timeout=30)
 
             print(f"📨 {self.account_name}: Response status code {response.status_code}")
 
@@ -152,8 +152,8 @@ class CheckIn:
             f"ℹ️ {self.account_name}: Executing check-in with Bearer token (using proxy: {'true' if self.http_proxy_config else 'false'})"
         )
 
-        # 使用 HTTP/1.1 而不是 HTTP/2，匹配 curl 的行为
-        client = httpx.Client(http2=False, timeout=30.0, proxy=self.http_proxy_config)
+        # 使用 curl_cffi Session，模拟 Chrome 浏览器指纹
+        session = curl_requests.Session(proxy=self.http_proxy_config, timeout=30)
         try:
             # 构建请求头
             headers = {
@@ -169,10 +169,10 @@ class CheckIn:
             }
 
             # 执行签到
-            success = self.execute_check_in(client, headers, auth_token)
+            success = self.execute_check_in(session, headers, auth_token)
 
             if success:
-                user_info = self.get_checkin_info(client, headers, auth_token)
+                user_info = self.get_checkin_info(session, headers, auth_token)
                 if user_info is None:
                     return False, {"error": "Failed to retrieve user info after check-in"}
                 return True, user_info
@@ -183,7 +183,7 @@ class CheckIn:
             print(f"❌ {self.account_name}: Error occurred during check-in process - {e}")
             return False, {"error": f"Check-in process error: {str(e)}"}
         finally:
-            client.close()
+            session.close()
 
     async def execute(self, access_token: str) -> tuple[bool, dict]:
         """使用提供的 token 执行签到操作

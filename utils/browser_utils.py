@@ -45,18 +45,16 @@ def filter_cookies(cookies: list[dict], origin: str) -> dict:
     """
     # 提取 provider origin 的域名
     provider_domain = urlparse(origin).netloc
-    print(f"🔍 Provider domain: {provider_domain}")
 
     # 过滤 cookies，只保留与 provider domain 匹配的
     user_cookies = {}
-    filtered_count = 0
-    total_count = 0
+    matched_items = []  # 存储 "name(domain)" 格式
+    filtered_items = []  # 存储 "name(domain)" 格式
 
     for cookie in cookies:
         cookie_name = cookie.get("name")
         cookie_value = cookie.get("value")
         cookie_domain = cookie.get("domain", "")
-        total_count += 1
 
         if cookie_name and cookie_value:
             # 检查 cookie domain 是否匹配 provider domain
@@ -71,15 +69,18 @@ def filter_cookies(cookies: list[dict], origin: str) -> dict:
                 or normalized_cookie_domain.endswith("." + normalized_provider_domain)
             ):
                 user_cookies[cookie_name] = cookie_value
-                print(f"  🔵 Matched cookie: {cookie_name} (domain: {cookie_domain})")
+                matched_items.append(f"{cookie_name}({cookie_domain})")
             else:
-                filtered_count += 1
-                print(f"  🔴 Filtered cookie: {cookie_name} (domain: {cookie_domain})")
+                filtered_items.append(f"{cookie_name}({cookie_domain})")
+
+    if matched_items:
+        print(f"  🔵 Matched: {', '.join(matched_items)}")
+    if filtered_items:
+        print(f"  🔴 Filtered: {', '.join(filtered_items)}")
 
     print(
-        f"🔍 Cookie filtering result: "
-        f"{len(user_cookies)} matched, {filtered_count} filtered, "
-        f"{total_count} total"
+        f"🔍 Cookie filtering result ({provider_domain}): "
+        f"{len(matched_items)} matched, {len(filtered_items)} filtered"
     )
 
     return user_cookies
