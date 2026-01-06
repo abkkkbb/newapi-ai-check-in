@@ -8,7 +8,6 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Generator, AsyncGenerator, List, Literal
 
-from utils.get_path import get_aiai_li_check_in_path
 from utils.get_check_in_status import newapi_check_in_status
 from utils.get_cdk import (
     get_runawaytime_cdk,
@@ -352,24 +351,6 @@ class AppConfig:
                 github_client_id=None,
                 github_auth_path=None,
                 linuxdo_client_id="451QxPCe4n9e7XrvzokzPcqPH9rUyTQF",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method=None,
-            ),
-            "aiai.li": ProviderConfig(
-                name="aiai.li",
-                origin="https://aiai.li",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path=get_aiai_li_check_in_path,
-                check_in_status=None,
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path=None,
-                linuxdo_client_id=None,
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method=None,

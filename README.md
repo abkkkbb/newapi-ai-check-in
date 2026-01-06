@@ -88,7 +88,7 @@ Affs:
 #### 字段说明：
 
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
-- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`aiai.li`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`，默认使用 `anyrouter`
+- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`，默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
 - `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数
