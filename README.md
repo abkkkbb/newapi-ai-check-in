@@ -11,6 +11,10 @@ Affs:
 - [我爱996](https://529961.com/register?aff=HV76)
 - [莹のAPI](https://api.wpgzs.top/register?aff=56zr)
 - [KFC API](https://kfc-api.sxxe.net/register?aff=xPnf)
+- [B4U](https://b4u.qzz.io/register?aff=2NeT)
+- [Elysiver](https://elysiver.h-e.top/register?aff=5JsA)
+- [HotaruApi](https://api.hotaruapi.top/register?aff=q6xq)
+- [Neb](https://ai.zzhdsgsss.xyz/register?aff=tXKw)
 
 其它使用 `newapi.ai` 功能相似, 可自定义环境变量 `PROVIDERS` 支持或 `PR` 到仓库。
 
@@ -38,12 +42,65 @@ Affs:
    - Name: `ACCOUNTS`
    - Value: 你的多账号配置数据
 
-### 3. 多账号配置格式
-> 如果未提供 `name` 字段，会使用 `{provider.name} 1`、`{provider.name} 2` 等默认名称。  
-> 配置中 `cookies`、`github`、`linux.do` 必须至少配置 1 个。   
-> 使用 `cookies` 设置时，`api_user` 字段必填。
+#### 2.1 全局 OAuth 账号配置（可选）
 
-示例：
+可以配置全局的 Linux.do 和 GitHub 账号，供多个 provider 共享使用。
+
+##### 2.1.1 ACCOUNTS_LINUX_DO
+
+在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
+   - Name: `ACCOUNTS_LINUX_DO`
+   - Value: Linux.do 账号列表
+
+```json
+[
+  {"username": "用户名1", "password": "密码1"},
+  {"username": "用户名2", "password": "密码2"}
+]
+```
+
+##### 2.1.2 ACCOUNTS_GITHUB
+
+在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
+   - Name: `ACCOUNTS_GITHUB`
+   - Value: GitHub 账号列表
+
+```json
+[
+  {"username": "用户名1", "password": "密码1"},
+  {"username": "用户名2", "password": "密码2"}
+]
+```
+
+### 3 多账号配置格式
+> 如果未提供 `name` 字段，会使用 `{provider.name} 1`、`{provider.name} 2` 等默认名称。  
+> 配置中 `cookies`、`github`、`linux.do` 必须至少配置 1 个。  
+> 使用 `cookies` 设置时，`api_user` 字段必填。  
+
+#### 3.1 OAuth 配置支持三种格式
+
+`github` 和 `linux.do` 字段支持以下三种配置格式：
+
+**1. bool 类型 - 使用全局账号**
+```json
+{"provider": "anyrouter", "linux.do": true}
+```
+当设置为 `true` 时，使用 `LINUX_DO_ACCOUNTS` 或 `GITHUB_ACCOUNTS` 中配置的所有账号。
+
+**2. dict 类型 - 单个账号**
+```json
+{"provider": "anyrouter", "linux.do": {"username": "用户名", "password": "密码"}}
+```
+
+**3. array 类型 - 多个账号**
+```json
+{"provider": "anyrouter", "linux.do": [
+  {"username": "用户名1", "password": "密码1"},
+  {"username": "用户名2", "password": "密码2"}
+]}
+```
+
+#### 3.2 完整示例
 
 ```json
 [
@@ -52,27 +109,20 @@ Affs:
       "cookies": {
         "session": "account1_session_value"
       },
-      "api_user": "account1_api_user_id"
+      "api_user": "account1_api_user_id",
       "github": {
         "username": "myuser",
-        "password": "mypass",
+        "password": "mypass"
       },
       "linux.do": {
         "username": "myuser",
-        "password": "mypass",
-      }
-    },
-    {
-      "name": "另一个账号",
-      "provider": "x666",
-      "proxy": {
-        "server": "http://username:password@proxy.example.com:8080"
-      }
-      "linux.do": {
-        "username": "user2",
-        "password": "pass2",
+        "password": "mypass"
       },
       // --- 额外的配置说明 ---
+      // 当前账号使用代理 
+      "proxy": {
+        "server": "http://username:password@proxy.example.com:8080"
+      },
       //provider: x666 必须配置
       "access_token": "来自 https://qd.x666.me/",
       "get_cdk_cookies": {
@@ -81,32 +131,48 @@ Affs:
         // provider: b4u 必须配置
         "__Secure-authjs.session-token": "来自 https://tw.b4u.qzz.io/"
       }
+    },
+    {
+      "name": "使用全局账号",
+      "provider": "agentrouter",
+      "linux.do": true,
+      "github": true
+    },
+    {
+      "name": "多个 OAuth 账号",
+      "provider": "wong",
+      "linux.do": [
+        {"username": "user1", "password": "pass1"},
+        {"username": "user2", "password": "pass2"}
+      ]
     }
   ]
 ```
 
-#### 字段说明：
+#### 3.3 字段说明：
 
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
 - `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`，默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
 - `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数
-- `linux.do`(可选)：用于登录身份验证
-  - `username`: 用户名
-  - `password`: 密码
-- `github`(可选)：用于登录身份验证
-  - `username`: 用户名
-  - `password`: 密码
+- `linux.do`(可选)：用于登录身份验证，支持三种格式：
+  - `true`：使用 `LINUX_DO_ACCOUNTS` 中的全局账号
+  - `{"username": "xxx", "password": "xxx"}`：单个账号
+  - `[{"username": "xxx", "password": "xxx"}, ...]`：多个账号
+- `github`(可选)：用于登录身份验证，支持三种格式：
+  - `true`：使用 `GITHUB_ACCOUNTS` 中的全局账号
+  - `{"username": "xxx", "password": "xxx"}`：单个账号
+  - `[{"username": "xxx", "password": "xxx"}, ...]`：多个账号
 
-#### 供应商配置：
+#### 3.4 供应商配置：
 
 在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
    - Name: `PROVIDERS`
    - Value: 供应商
 
 
-#### 代理配置
+#### 3.5 代理配置
 > 应用到所有的账号，如果单个账号需要使用代理，请在单个账号配置中添加 `proxy` 字段。  
 > 打开 [webshare](https://dashboard.webshare.io/) 注册账号，获取免费代理
 
@@ -130,7 +196,7 @@ Affs:
 ```
 
 
-#### 如何获取 cookies 与 api_user 的值。
+#### 3.6 如何获取 cookies 与 api_user 的值。
 
 通过 F12 工具，切到 Application 面板，Cookies -> session 的值，最好重新登录下，但有可能提前失效，失效后报 401 错误，到时请再重新获取。
 
@@ -140,7 +206,7 @@ Affs:
 
 ![获取 api_user](./assets/request-api-user.png)
 
-#### `GitHub` 在新设备上登录会有两次验证
+#### 3.7 `GitHub` 在新设备上登录会有两次验证
 
 通过打印日志中链接打开并输入验证码。
 

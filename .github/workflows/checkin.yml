@@ -97,6 +97,8 @@ jobs:
     - name: 执行签到
       env:
         ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
+        ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
+        ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
         PROVIDERS: ${{ secrets.PROVIDERS }}
         PROXY: ${{secrets.PROXY}}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}

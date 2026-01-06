@@ -94,7 +94,7 @@ jobs:
 
     - name: 执行阅读帖子
       env:
-        ACCOUNTS: ${{ secrets.ACCOUNTS }}
+        ACCOUNTS: ${{ secrets.ACCOUNTS_LINUX_DO }}
         LINUXDO_BASE_TOPIC_ID: ${{ secrets.LINUXDO_BASE_TOPIC_ID }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}

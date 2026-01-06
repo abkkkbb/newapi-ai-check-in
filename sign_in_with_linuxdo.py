@@ -70,7 +70,7 @@ class LinuxDoSignIn:
             os="macos",  # 强制使用 macOS 指纹，避免跨平台指纹不一致问题
             config={
                 "forceScopeAccess": True,
-            }
+            },
         ) as browser:
             # 只有在缓存文件存在时才加载 storage_state
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
@@ -91,13 +91,10 @@ class LinuxDoSignIn:
             page = await context.new_page()
 
             async with ClickSolver(
-                    framework=FrameworkType.CAMOUFOX,
-                    page=page,
-                    max_attempts=5,
-                    attempt_delay=3
-                ) as solver:
+                framework=FrameworkType.CAMOUFOX, page=page, max_attempts=5, attempt_delay=3
+            ) as solver:
 
-                try:                
+                try:
                     # 检查是否已经登录（通过缓存恢复）
                     is_logged_in = False
                     oauth_url = (
@@ -110,13 +107,17 @@ class LinuxDoSignIn:
                             print(f"ℹ️ {self.account_name}: Checking login status at {oauth_url}")
                             # 直接访问授权页面检查是否已登录
                             response = await page.goto(oauth_url, wait_until="domcontentloaded")
-                            print(f"ℹ️ {self.account_name}: redirected to app page {response.url if response else 'N/A'}")
+                            print(
+                                f"ℹ️ {self.account_name}: redirected to app page {response.url if response else 'N/A'}"
+                            )
                             await save_page_content_to_file(page, "sign_in_check", self.account_name, prefix="linuxdo")
 
                             # 登录后可能直接跳转回应用页面
                             if response and response.url.startswith(self.provider_config.origin):
                                 is_logged_in = True
-                                print(f"✅ {self.account_name}: Already logged in via cache, proceeding to authorization")
+                                print(
+                                    f"✅ {self.account_name}: Already logged in via cache, proceeding to authorization"
+                                )
                             else:
                                 # 检查是否出现授权按钮（表示已登录）
                                 allow_btn = await page.query_selector('a[href^="/oauth2/approve"]')
@@ -128,7 +129,10 @@ class LinuxDoSignIn:
                                 else:
                                     print(f"ℹ️ {self.account_name}: Cache session expired, need to login again")
                         except Exception as e:
-                            print(f"⚠️ {self.account_name}: Failed to check login status: {e}")
+                            print(
+                                f"⚠️ {self.account_name}: Failed to check login status: {e}\n"
+                                f"Current page is: {page.url}"
+                            )
 
                     # 如果未登录，则执行登录流程
                     if not is_logged_in:
@@ -136,6 +140,21 @@ class LinuxDoSignIn:
                             print(f"ℹ️ {self.account_name}: Starting to sign in linux.do")
 
                             await page.goto("https://linux.do/login", wait_until="domcontentloaded")
+
+                            # 检查是否在 Cloudflare 验证页面
+                            page_title = await page.title()
+                            page_content = await page.content()
+
+                            if "Just a moment" in page_title or "Checking your browser" in page_content:
+                                print(f"ℹ️ {self.account_name}: Cloudflare challenge detected, auto-solving...")
+                                try:
+                                    await solver.solve_captcha(
+                                        captcha_container=page, captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
+                                    )
+                                    print(f"✅ {self.account_name}: Cloudflare challenge auto-solved")
+                                    await page.wait_for_timeout(10000)
+                                except Exception as solve_err:
+                                    print(f"⚠️ {self.account_name}: Auto-solve failed: {solve_err}")
 
                             await page.fill("#login-account-name", self.username)
                             await page.wait_for_timeout(2000)
@@ -181,7 +200,6 @@ class LinuxDoSignIn:
                             await take_screenshot(page, "auth_page_navigation_failed_bypass", self.account_name)
                             return False, {"error": "Linux.do authorization page navigation failed"}, None
 
-                    # 统一处理授权逻辑（无论是否通过缓存登录）
                     try:
                         # 等待授权按钮出现，最多等待30秒
                         print(f"ℹ️ {self.account_name}: Waiting for authorization button...")
@@ -189,109 +207,133 @@ class LinuxDoSignIn:
                         allow_btn_ele = await page.query_selector('a[href^="/oauth2/approve"]')
 
                         if allow_btn_ele:
-                            print(f"ℹ️ {self.account_name}: Clicking authorization button...")
+                            print(f"✅ {self.account_name}: Approve button found, proceeding to authorization")
                             await allow_btn_ele.click()
-                            # 使用配置的 OAuth 回调路径匹配模式
-                            redirect_pattern = self.provider_config.get_linuxdo_auth_redirect_pattern()
-                            print(f"ℹ️ {self.account_name}: Waiting for redirect to: {redirect_pattern}")
-                            await page.wait_for_url(redirect_pattern, timeout=30000)
-                            await page.wait_for_timeout(5000)
-
-                            # 检查是否在 Cloudflare 验证页面
-                            page_title = await page.title()
-                            page_content = await page.content()
-                            
-                            # 标记是否检测到 Cloudflare 验证页面
-                            cloudflare_challenge_detected = False
-
-                            if "Just a moment" in page_title or "Checking your browser" in page_content:
-                                cloudflare_challenge_detected = True
-                                print(f"ℹ️ {self.account_name}: Cloudflare challenge detected, auto-solving...")
-                                try:
-                                    await solver.solve_captcha(
-                                        captcha_container=page,
-                                        captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
-                                    )
-                                    print(f"✅ {self.account_name}: Cloudflare challenge auto-solved")
-                                    await page.wait_for_timeout(10000)
-                                except Exception as solve_err:
-                                    print(f"⚠️ {self.account_name}: Auto-solve failed: {solve_err}")
-
-                            # 从 localStorage 获取 user 对象并提取 id
-                            api_user = None
-                            try:
-                                try:
-                                    await page.wait_for_function('localStorage.getItem("user") !== null', timeout=10000)
-                                except Exception:
-                                    await page.wait_for_timeout(5000)
-
-                                user_data = await page.evaluate("() => localStorage.getItem('user')")
-                                if user_data:
-                                    user_obj = json.loads(user_data)
-                                    api_user = user_obj.get("id")
-                                    if api_user:
-                                        print(f"✅ {self.account_name}: Got api user: {api_user}")
-                                    else:
-                                        print(f"⚠️ {self.account_name}: User id not found in localStorage")
-                                else:
-                                    print(f"⚠️ {self.account_name}: User data not found in localStorage")
-                            except Exception as e:
-                                print(f"⚠️ {self.account_name}: Error reading user from localStorage: {e}")
-
-                            if api_user:
-                                print(f"✅ {self.account_name}: OAuth authorization successful")
-
-                                # 提取 session cookie，只保留与 provider domain 匹配的
-                                restore_cookies = await page.context.cookies()
-                                user_cookies = filter_cookies(restore_cookies, self.provider_config.origin)
-
-                                result = {"cookies": user_cookies, "api_user": api_user}
-                                
-                                # 只有当检测到 Cloudflare 验证页面时，才获取并返回浏览器指纹头部信息
-                                browser_headers = None
-                                if cloudflare_challenge_detected:
-                                    browser_headers = await get_browser_headers(page)
-                                    print_browser_headers(self.account_name, browser_headers)
-                                    print(f"ℹ️ {self.account_name}: Browser headers returned (Cloudflare challenge was detected)")
-                                else:
-                                    print(f"ℹ️ {self.account_name}: Browser headers not returned (no Cloudflare challenge detected)")
-
-                                return True, result, browser_headers
-                            else:
-                                print(f"⚠️ {self.account_name}: OAuth callback received but no user ID found")
-                                await take_screenshot(page, "oauth_failed_no_user_id_bypass", self.account_name)
-                                parsed_url = urlparse(page.url)
-                                query_params = parse_qs(parsed_url.query)
-
-                                # 如果 query 中包含 code，说明 OAuth 回调成功
-                                if "code" in query_params:
-                                    print(f"✅ {self.account_name}: OAuth code received: {query_params.get('code')}")
-                                    # 只有当检测到 Cloudflare 验证页面时，才获取并返回浏览器指纹头部信息
-                                    browser_headers = None
-                                    if cloudflare_challenge_detected:
-                                        browser_headers = await get_browser_headers(page)
-                                        print_browser_headers(self.account_name, browser_headers)
-                                        print(f"ℹ️ {self.account_name}: Browser headers returned (Cloudflare challenge was detected)")
-                                    else:
-                                        print(f"ℹ️ {self.account_name}: Browser headers not returned (no Cloudflare challenge detected)")
-                                    return True, query_params, browser_headers
-                                else:
-                                    print(f"❌ {self.account_name}: OAuth failed, no code in callback")
-                                    return False, {
-                                        "error": "Linux.do OAuth failed - no code in callback",
-                                    }, None
                         else:
                             print(f"❌ {self.account_name}: Approve button not found")
                             await take_screenshot(page, "approve_button_not_found_bypass", self.account_name)
                             return False, {"error": "Linux.do allow button not found"}, None
-
                     except Exception as e:
                         print(
-                            f"❌ {self.account_name}: Error occurred during authorization: {e}\n\n"
+                            f"❌ {self.account_name}: Error occurred during authorization: {e}\n"
                             f"Current page is: {page.url}"
                         )
                         await take_screenshot(page, "authorization_failed_bypass", self.account_name)
                         return False, {"error": "Linux.do authorization failed"}, None
+
+                    # 统一处理授权逻辑（无论是否通过缓存登录）
+                    # 标记是否检测到 Cloudflare 验证页面
+                    cloudflare_challenge_detected = False
+
+                    try:
+                        # 使用配置的 OAuth 回调路径匹配模式
+                        redirect_pattern = self.provider_config.get_linuxdo_auth_redirect_pattern()
+                        print(f"ℹ️ {self.account_name}: Waiting for redirect to: {redirect_pattern}")
+                        await page.wait_for_url(redirect_pattern, timeout=30000)
+                        await page.wait_for_timeout(5000)
+
+                        # 检查是否在 Cloudflare 验证页面
+                        page_title = await page.title()
+                        page_content = await page.content()
+
+                        if "Just a moment" in page_title or "Checking your browser" in page_content:
+                            cloudflare_challenge_detected = True
+                            print(f"ℹ️ {self.account_name}: Cloudflare challenge detected, auto-solving...")
+                            try:
+                                await solver.solve_captcha(
+                                    captcha_container=page, captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
+                                )
+                                print(f"✅ {self.account_name}: Cloudflare challenge auto-solved")
+                                await page.wait_for_timeout(10000)
+                            except Exception as solve_err:
+                                print(f"⚠️ {self.account_name}: Auto-solve failed: {solve_err}")
+                    except Exception as e:
+                        # 检查 URL 中是否包含 code 参数，如果包含则视为正常（OAuth 回调成功）
+                        if "code=" in page.url:
+                            print(f"ℹ️ {self.account_name}: Redirect timeout but OAuth code found in URL, continuing...")
+                        else:
+                            print(
+                                f"❌ {self.account_name}: Error occurred during redirecting: {e}\n"
+                                f"Current page is: {page.url}"
+                            )
+                            await take_screenshot(page, "linuxdo_authorization_failed", self.account_name)
+                            return False, {"error": "Linux.do authorization failed"}, None
+
+                    # 从 localStorage 获取 user 对象并提取 id
+                    api_user = None
+                    try:
+                        try:
+                            await page.wait_for_function('localStorage.getItem("user") !== null', timeout=10000)
+                        except Exception:
+                            await page.wait_for_timeout(5000)
+
+                        user_data = await page.evaluate("() => localStorage.getItem('user')")
+                        if user_data:
+                            user_obj = json.loads(user_data)
+                            api_user = user_obj.get("id")
+                            if api_user:
+                                print(f"✅ {self.account_name}: Got api user: {api_user}")
+                            else:
+                                print(f"⚠️ {self.account_name}: User id not found in localStorage")
+                        else:
+                            print(f"⚠️ {self.account_name}: User data not found in localStorage")
+                    except Exception as e:
+                        print(f"⚠️ {self.account_name}: Error reading user from localStorage: {e}")
+
+                    if api_user:
+                        print(f"✅ {self.account_name}: OAuth authorization successful")
+
+                        # 提取 session cookie，只保留与 provider domain 匹配的
+                        restore_cookies = await page.context.cookies()
+                        user_cookies = filter_cookies(restore_cookies, self.provider_config.origin)
+
+                        result = {"cookies": user_cookies, "api_user": api_user}
+
+                        # 只有当检测到 Cloudflare 验证页面时，才获取并返回浏览器指纹头部信息
+                        browser_headers = None
+                        if cloudflare_challenge_detected:
+                            browser_headers = await get_browser_headers(page)
+                            print_browser_headers(self.account_name, browser_headers)
+                            print(
+                                f"ℹ️ {self.account_name}: Browser headers returned (Cloudflare challenge was detected)"
+                            )
+                        else:
+                            print(
+                                f"ℹ️ {self.account_name}: Browser headers not returned (no Cloudflare challenge detected)"
+                            )
+
+                        return True, result, browser_headers
+                    else:
+                        print(f"⚠️ {self.account_name}: OAuth callback received but no user ID found")
+                        await take_screenshot(page, "oauth_failed_no_user_id_bypass", self.account_name)
+                        parsed_url = urlparse(page.url)
+                        query_params = parse_qs(parsed_url.query)
+
+                        # 如果 query 中包含 code，说明 OAuth 回调成功
+                        if "code" in query_params:
+                            print(f"✅ {self.account_name}: OAuth code received: {query_params.get('code')}")
+                            # 只有当检测到 Cloudflare 验证页面时，才获取并返回浏览器指纹头部信息
+                            browser_headers = None
+                            if cloudflare_challenge_detected:
+                                browser_headers = await get_browser_headers(page)
+                                print_browser_headers(self.account_name, browser_headers)
+                                print(
+                                    f"ℹ️ {self.account_name}: Browser headers returned (Cloudflare challenge was detected)"
+                                )
+                            else:
+                                print(
+                                    f"ℹ️ {self.account_name}: Browser headers not returned (no Cloudflare challenge detected)"
+                                )
+                            return True, query_params, browser_headers
+                        else:
+                            print(f"❌ {self.account_name}: OAuth failed, no code in callback")
+                            return (
+                                False,
+                                {
+                                    "error": "Linux.do OAuth failed - no code in callback",
+                                },
+                                None,
+                            )
 
                 except Exception as e:
                     print(f"❌ {self.account_name}: Error occurred while processing linux.do page: {e}")

@@ -177,6 +177,21 @@ class ProviderConfig:
         return f"**{self.origin}{self.linuxdo_auth_redirect_path}"
 
 @dataclass
+class OAuthAccountConfig:
+    """OAuth 账号配置（用于 linux.do 和 github）"""
+    username: str
+    password: str
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OAuthAccountConfig":
+        """从字典创建 OAuthAccountConfig"""
+        return cls(
+            username=data.get("username", ""),
+            password=data.get("password", ""),
+        )
+
+
+@dataclass
 class AccountConfig:
     """账号配置"""
 
@@ -184,21 +199,30 @@ class AccountConfig:
     cookies: dict | str = ""
     api_user: str = ""
     name: str | None = None
-    linux_do: dict | None = None
-    github: dict | None = None
+    linux_do: List["OAuthAccountConfig"] | None = None  # 改为列表类型
+    github: List["OAuthAccountConfig"] | None = None  # 改为列表类型
     proxy: dict | None = None
     extra: dict = field(default_factory=dict)  # 存储额外的配置字段
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AccountConfig":
-        """从字典创建 AccountConfig"""
+    def from_dict(
+        cls,
+        data: dict,
+        linux_do_accounts: List["OAuthAccountConfig"] | None = None,
+        github_accounts: List["OAuthAccountConfig"] | None = None,
+    ) -> "AccountConfig":
+        """从字典创建 AccountConfig
+        
+        Args:
+            data: 账号配置字典
+            linux_do_accounts: 解析后的 Linux.do OAuth 账号列表（可选）
+            github_accounts: 解析后的 GitHub OAuth 账号列表（可选）
+        """
         provider = data.get("provider", "anyrouter")
         name = data.get("name")
 
         # Handle different authentication types
         cookies = data.get("cookies", "")
-        linux_do = data.get("linux.do")
-        github = data.get("github")
         proxy = data.get("proxy")
 
         # 提取已知字段
@@ -211,8 +235,8 @@ class AccountConfig:
             name=name if name else None,
             cookies=cookies,
             api_user=data.get("api_user", ""),
-            linux_do=linux_do,
-            github=github,
+            linux_do=linux_do_accounts,
+            github=github_accounts,
             proxy=proxy,
             extra=extra,
         )
@@ -238,6 +262,8 @@ class AppConfig:
 
     providers: Dict[str, ProviderConfig]
     accounts: List["AccountConfig"] = field(default_factory=list)
+    linux_do_accounts: List["OAuthAccountConfig"] = field(default_factory=list)  # 全局 Linux.do 账号列表
+    github_accounts: List["OAuthAccountConfig"] = field(default_factory=list)  # 全局 GitHub 账号列表
     global_proxy: Dict | None = None
 
     @classmethod
@@ -245,6 +271,8 @@ class AppConfig:
         cls,
         providers_env: str = "PROVIDERS",
         accounts_env: str = "ACCOUNTS",
+        linux_do_accounts_env: str = "ACCOUNTS_LINUX_DO",
+        github_accounts_env: str = "ACCOUNTS_GITHUB",
         proxy_env: str = "PROXY",
     ) -> "AppConfig":
         """从环境变量加载配置
@@ -252,18 +280,30 @@ class AppConfig:
         Args:
             providers_env: 自定义 providers 配置的环境变量名称，默认为 "PROVIDERS"
             accounts_env: 账号配置的环境变量名称，默认为 "ACCOUNTS"
+            linux_do_accounts_env: Linux.do 账号配置的环境变量名称，默认为 "ACCOUNTS_LINUX_DO"
+            github_accounts_env: GitHub 账号配置的环境变量名称，默认为 "ACCOUNTS_GITHUB"
             proxy_env: 全局代理配置的环境变量名称，默认为 "PROXY"
         """
         # 加载 providers 配置
         providers = cls._load_providers(providers_env)
 
-        # 加载账号配置
-        accounts = cls._load_accounts(accounts_env)
+        # 加载全局 OAuth 账号配置
+        linux_do_accounts = cls._load_oauth_accounts(linux_do_accounts_env, "Linux.do")
+        github_accounts = cls._load_oauth_accounts(github_accounts_env, "GitHub")
+
+        # 加载账号配置（传入全局 OAuth 账号用于解析 bool 类型配置）
+        accounts = cls._load_accounts(accounts_env, linux_do_accounts, github_accounts)
 
         # 加载全局代理配置
         global_proxy = cls._load_proxy(proxy_env)
 
-        return cls(providers=providers, accounts=accounts, global_proxy=global_proxy)
+        return cls(
+            providers=providers,
+            accounts=accounts,
+            linux_do_accounts=linux_do_accounts,
+            github_accounts=github_accounts,
+            global_proxy=global_proxy,
+        )
 
     @classmethod
     def _load_proxy(cls, proxy_env: str) -> Dict | None:
@@ -540,12 +580,140 @@ class AppConfig:
         return providers
 
     @classmethod
-    def _load_accounts(cls, accounts_env: str) -> List["AccountConfig"]:
+    def _load_oauth_accounts(cls, env_name: str, provider_name: str) -> List["OAuthAccountConfig"]:
+        """从环境变量加载 OAuth 账号配置
+        
+        Args:
+            env_name: 环境变量名称
+            provider_name: 提供商名称（用于日志输出）
+        
+        Returns:
+            OAuth 账号配置列表
+        """
+        accounts_str = os.getenv(env_name)
+        
+        if not accounts_str:
+            print(f"⚠️ {env_name} No {provider_name} account(s) from {env_name}")
+            return []
+
+        try:
+            accounts_data = json.loads(accounts_str)
+
+            # 检查是否为数组格式
+            if not isinstance(accounts_data, list):
+                print(f"⚠️ {env_name} must be a JSON array, ignoring")
+                return []
+
+            accounts = []
+            for i, account in enumerate(accounts_data):
+                if not isinstance(account, dict):
+                    print(f"⚠️ {env_name} account {i + 1} must be a dictionary, skipping")
+                    continue
+
+                # 验证必需字段
+                if "username" not in account or "password" not in account:
+                    print(f"⚠️ {env_name} account {i + 1} must contain username and password, skipping")
+                    continue
+
+                # 验证字段不为空
+                if not account["username"] or not account["password"]:
+                    print(f"⚠️ {env_name} account {i + 1} username and password cannot be empty, skipping")
+                    continue
+
+                accounts.append(OAuthAccountConfig.from_dict(account))
+
+            if accounts:
+                print(f"⚙️ Loaded {len(accounts)} {provider_name} account(s) from {env_name}")
+            
+            return accounts
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Failed to parse {env_name}: {e}")
+            return []
+        except Exception as e:
+            print(f"⚠️ Error loading {env_name}: {e}")
+            return []
+
+    @classmethod
+    def _parse_oauth_config(
+        cls,
+        config_value,
+        global_accounts: List["OAuthAccountConfig"],
+        config_name: str,
+        account_index: int,
+    ) -> List["OAuthAccountConfig"] | None:
+        """解析 OAuth 配置，支持 bool、单个账号、多个账号三种格式
+        
+        Args:
+            config_value: 配置值，可以是 bool、dict 或 list
+            global_accounts: 全局 OAuth 账号列表
+            config_name: 配置名称（用于日志输出，如 "linux.do" 或 "github"）
+            account_index: 账号索引（用于日志输出）
+        
+        Returns:
+            OAuth 账号配置列表，如果配置无效则返回 None
+        """
+        # bool 类型：使用全局账号
+        if isinstance(config_value, bool):
+            if config_value:
+                if not global_accounts:
+                    print(f"⚠️ Account {account_index + 1} {config_name}=true but no global {config_name} accounts configured")
+                    return []
+                return global_accounts.copy()
+            else:
+                return []
+        
+        # dict 类型：单个账号
+        if isinstance(config_value, dict):
+            # 验证必需字段
+            if "username" not in config_value or "password" not in config_value:
+                print(f"❌ Account {account_index + 1} {config_name} configuration must contain username and password")
+                return None
+
+            # 验证字段不为空
+            if not config_value["username"] or not config_value["password"]:
+                print(f"❌ Account {account_index + 1} {config_name} username and password cannot be empty")
+                return None
+
+            return [OAuthAccountConfig.from_dict(config_value)]
+        
+        # list 类型：多个账号
+        if isinstance(config_value, list):
+            accounts = []
+            for j, item in enumerate(config_value):
+                if not isinstance(item, dict):
+                    print(f"❌ Account {account_index + 1} {config_name}[{j}] must be a dictionary")
+                    return None
+
+                # 验证必需字段
+                if "username" not in item or "password" not in item:
+                    print(f"❌ Account {account_index + 1} {config_name}[{j}] must contain username and password")
+                    return None
+
+                # 验证字段不为空
+                if not item["username"] or not item["password"]:
+                    print(f"❌ Account {account_index + 1} {config_name}[{j}] username and password cannot be empty")
+                    return None
+
+                accounts.append(OAuthAccountConfig.from_dict(item))
+            return accounts
+        
+        print(f"❌ Account {account_index + 1} {config_name} configuration must be bool, dict, or array")
+        return None
+
+    @classmethod
+    def _load_accounts(
+        cls,
+        accounts_env: str,
+        global_linux_do_accounts: List["OAuthAccountConfig"],
+        global_github_accounts: List["OAuthAccountConfig"],
+    ) -> List["AccountConfig"]:
         """从环境变量加载多账号配置
         
         Args:
             accounts_env: 环境变量名称或直接的 JSON 字符串值
                          优先尝试作为环境变量名获取，获取不到则作为值使用
+            global_linux_do_accounts: 全局 Linux.do 账号列表
+            global_github_accounts: 全局 GitHub 账号列表
         
         Returns:
             账号配置列表，如果加载失败则返回空列表
@@ -569,83 +737,72 @@ class AppConfig:
             # 验证账号数据格式
             for i, account in enumerate(accounts_data):
                 if not isinstance(account, dict):
-                    print(f"❌ Account {i + 1} configuration format is incorrect")
-                    return []
+                    print(f"⚠️ Account {i + 1} configuration format is incorrect, skipping")
+                    continue
 
-                # 检查必须有 linux.do、github 或 cookies 配置
+                # 如果有 name 字段,确保它不是空字符串
+                if "name" in account and not account["name"]:
+                    print(f"⚠️ Account {i + 1} name field cannot be empty, skipping")
+                    continue
+
+                account_name = account.get("name") or f"Account {i + 1}"
+
+                # 检查配置键是否存在
                 has_linux_do = "linux.do" in account
                 has_github = "github" in account
                 has_cookies = "cookies" in account
 
-                if not has_linux_do and not has_github and not has_cookies:
-                    print(f"❌ Account {i + 1} must have either 'linux.do', 'github', or 'cookies' configuration")
-                    return []
-
-                # 确保必要字段存在后再创建 AccountConfig
-                if has_cookies:
-                    if not account.get("cookies"):
-                        print(f"❌ Account {i + 1} cookies cannot be empty")
-                        return []
-                    if not account.get("api_user"):
-                        print(f"❌ Account {i + 1} api_user cannot be empty")
-                        return []
-
-                # 验证 linux.do 配置
+                # 解析 linux.do 配置（支持 bool、单个账号、多个账号）
+                linux_do_accounts = None
                 if has_linux_do:
-                    auth_config = account["linux.do"]
-                    if not isinstance(auth_config, dict):
-                        print(f"❌ Account {i + 1} linux.do configuration must be a dictionary")
-                        return []
+                    linux_do_accounts = cls._parse_oauth_config(
+                        account["linux.do"],
+                        global_linux_do_accounts,
+                        "linux.do",
+                        i,
+                    )
+                    if linux_do_accounts is None:
+                        print(f"⚠️ {account_name} linux.do configuration is invalid, skipping")
+                        continue
 
-                    # 验证必需字段
-                    if "username" not in auth_config or "password" not in auth_config:
-                        print(f"❌ Account {i + 1} linux.do configuration must contain username and password")
-                        return []
-
-                    # 验证字段不为空
-                    if not auth_config["username"] or not auth_config["password"]:
-                        print(f"❌ Account {i + 1} linux.do username and password cannot be empty")
-                        return []
-
-                # 验证 github 配置
+                # 解析 github 配置（支持 bool、单个账号、多个账号）
+                github_accounts = None
                 if has_github:
-                    auth_config = account["github"]
-                    if not isinstance(auth_config, dict):
-                        print(f"❌ Account {i + 1} github configuration must be a dictionary")
-                        return []
-
-                    # 验证必需字段
-                    if "username" not in auth_config or "password" not in auth_config:
-                        print(f"❌ Account {i + 1} github configuration must contain username and password")
-                        return []
-
-                    # 验证字段不为空
-                    if not auth_config["username"] or not auth_config["password"]:
-                        print(f"❌ Account {i + 1} github username and password cannot be empty")
-                        return []
+                    github_accounts = cls._parse_oauth_config(
+                        account["github"],
+                        global_github_accounts,
+                        "github",
+                        i,
+                    )
+                    if github_accounts is None:
+                        print(f"⚠️ {account_name} github configuration is invalid, skipping")
+                        continue
 
                 # 验证 cookies 配置
+                valid_cookies = False
                 if has_cookies:
-                    cookies_config = account["cookies"]
-                    if not cookies_config:
-                        print(f"❌ Account {i + 1} cookies cannot be empty")
-                        return []
+                    cookies_config = account.get("cookies")
+                    api_user = account.get("api_user")
+                    
+                    if cookies_config and api_user:
+                        valid_cookies = True
+                    elif cookies_config and not api_user:
+                        print(f"⚠️ {account_name} with cookies must have api_user field")
+                    elif not cookies_config:
+                        print(f"⚠️ {account_name} cookies is empty")
 
-                    # 验证必须要有 api_user 字段
-                    if "api_user" not in account:
-                        print(f"❌ Account {i + 1} with cookies must have api_user field")
-                        return []
+                # 检查解析后是否至少有一个有效的认证方式
+                has_valid_linux_do = linux_do_accounts is not None and len(linux_do_accounts) > 0
+                has_valid_github = github_accounts is not None and len(github_accounts) > 0
+                has_valid_cookies = valid_cookies
 
-                    if not account["api_user"]:
-                        print(f"❌ Account {i + 1} api_user cannot be empty")
-                        return []
+                if not has_valid_linux_do and not has_valid_github and not has_valid_cookies:
+                    print(f"⚠️ {account_name} must have at least one valid authentication method (linux.do, github, or cookies), skipping")
+                    continue
 
-                # 如果有 name 字段,确保它不是空字符串
-                if "name" in account and not account["name"]:
-                    print(f"❌ Account {i + 1} name field cannot be empty")
-                    return []
-
-                accounts.append(AccountConfig.from_dict(account))
+                # 创建 AccountConfig，传入解析后的 OAuth 账号列表
+                account_config = AccountConfig.from_dict(account, linux_do_accounts, github_accounts)
+                accounts.append(account_config)
 
             return accounts
         except json.JSONDecodeError as e:

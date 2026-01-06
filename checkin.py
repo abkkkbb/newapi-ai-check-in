@@ -1418,8 +1418,8 @@ class CheckIn:
 
         # 解析账号配置
         cookies_data = self.account_config.cookies
-        github_info = self.account_config.github
-        linuxdo_info = self.account_config.linux_do
+        github_accounts = self.account_config.github  # 现在是 List[OAuthAccountConfig] 类型
+        linuxdo_accounts = self.account_config.linux_do  # 现在是 List[OAuthAccountConfig] 类型
         results = []
 
         # 尝试 cookies 认证
@@ -1449,56 +1449,60 @@ class CheckIn:
                 print(f"❌ {self.account_name}: Cookies authentication error: {e}")
                 results.append(("cookies", False, {"error": str(e)}))
 
-        # 尝试 GitHub 认证
-        if github_info:
-            print(f"\nℹ️ {self.account_name}: Trying GitHub authentication")
-            try:
-                username = github_info.get("username")
-                password = github_info.get("password")
-                if not username or not password:
-                    print(f"❌ {self.account_name}: Incomplete GitHub account information")
-                    results.append(("github", False, {"error": "Incomplete GitHub account information"}))
-                else:
-                    # 使用 GitHub 账号执行签到，传入公用请求头
-                    success, user_info = await self.check_in_with_github(
-                        username, password, bypass_cookies, common_headers
-                    )
-                    if success:
-                        print(f"✅ {self.account_name}: GitHub authentication successful")
-                        results.append(("github", True, user_info))
+        # 尝试 GitHub 认证（支持多个账号）
+        if github_accounts:
+            for idx, github_account in enumerate(github_accounts):
+                account_label = f"github[{idx}]" if len(github_accounts) > 1 else "github"
+                print(f"\nℹ️ {self.account_name}: Trying GitHub authentication ({github_account.username})")
+                try:
+                    username = github_account.username
+                    password = github_account.password
+                    if not username or not password:
+                        print(f"❌ {self.account_name}: Incomplete GitHub account information")
+                        results.append((account_label, False, {"error": "Incomplete GitHub account information"}))
                     else:
-                        print(f"❌ {self.account_name}: GitHub authentication failed")
-                        results.append(("github", False, user_info))
-            except Exception as e:
-                print(f"❌ {self.account_name}: GitHub authentication error: {e}")
-                results.append(("github", False, {"error": str(e)}))
+                        # 使用 GitHub 账号执行签到，传入公用请求头
+                        success, user_info = await self.check_in_with_github(
+                            username, password, bypass_cookies, common_headers
+                        )
+                        if success:
+                            print(f"✅ {self.account_name}: GitHub authentication successful ({github_account.username})")
+                            results.append((account_label, True, user_info))
+                        else:
+                            print(f"❌ {self.account_name}: GitHub authentication failed ({github_account.username})")
+                            results.append((account_label, False, user_info))
+                except Exception as e:
+                    print(f"❌ {self.account_name}: GitHub authentication error ({github_account.username}): {e}")
+                    results.append((account_label, False, {"error": str(e)}))
 
-        # 尝试 Linux.do 认证
-        if linuxdo_info:
-            print(f"\nℹ️ {self.account_name}: Trying Linux.do authentication")
-            try:
-                username = linuxdo_info.get("username")
-                password = linuxdo_info.get("password")
-                if not username or not password:
-                    print(f"❌ {self.account_name}: Incomplete Linux.do account information")
-                    results.append(("linux.do", False, {"error": "Incomplete Linux.do account information"}))
-                else:
-                    # 使用 Linux.do 账号执行签到，传入公用请求头
-                    success, user_info = await self.check_in_with_linuxdo(
-                        username,
-                        password,
-                        bypass_cookies,
-                        common_headers,
-                    )
-                    if success:
-                        print(f"✅ {self.account_name}: Linux.do authentication successful")
-                        results.append(("linux.do", True, user_info))
+        # 尝试 Linux.do 认证（支持多个账号）
+        if linuxdo_accounts:
+            for idx, linuxdo_account in enumerate(linuxdo_accounts):
+                account_label = f"linux.do[{idx}]" if len(linuxdo_accounts) > 1 else "linux.do"
+                print(f"\nℹ️ {self.account_name}: Trying Linux.do authentication ({linuxdo_account.username})")
+                try:
+                    username = linuxdo_account.username
+                    password = linuxdo_account.password
+                    if not username or not password:
+                        print(f"❌ {self.account_name}: Incomplete Linux.do account information")
+                        results.append((account_label, False, {"error": "Incomplete Linux.do account information"}))
                     else:
-                        print(f"❌ {self.account_name}: Linux.do authentication failed")
-                        results.append(("linux.do", False, user_info))
-            except Exception as e:
-                print(f"❌ {self.account_name}: Linux.do authentication error: {e}")
-                results.append(("linux.do", False, {"error": str(e)}))
+                        # 使用 Linux.do 账号执行签到，传入公用请求头
+                        success, user_info = await self.check_in_with_linuxdo(
+                            username,
+                            password,
+                            bypass_cookies,
+                            common_headers,
+                        )
+                        if success:
+                            print(f"✅ {self.account_name}: Linux.do authentication successful ({linuxdo_account.username})")
+                            results.append((account_label, True, user_info))
+                        else:
+                            print(f"❌ {self.account_name}: Linux.do authentication failed ({linuxdo_account.username})")
+                            results.append((account_label, False, user_info))
+                except Exception as e:
+                    print(f"❌ {self.account_name}: Linux.do authentication error ({linuxdo_account.username}): {e}")
+                    results.append((account_label, False, {"error": str(e)}))
 
         if not results:
             print(f"❌ {self.account_name}: No valid authentication method found in configuration")

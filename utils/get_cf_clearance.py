@@ -88,6 +88,7 @@ async def get_cf_clearance(
                                 captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
                             )
                             print(f"✅ {account_name}: Cloudflare challenge auto-solved")
+                            await page.wait_for_timeout(10000)
                         except Exception as solve_err:
                             print(f"⚠️ {account_name}: Auto-solve failed: {solve_err}, waiting for manual verification...")
                             # 自动求解失败，回退到手动等待

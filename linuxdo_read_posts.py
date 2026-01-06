@@ -397,7 +397,7 @@ class LinuxDoReadPosts:
 
 
 def load_linuxdo_accounts() -> list[dict]:
-    """从 ACCOUNTS 环境变量加载配置了 linux.do 登录方式的账号
+    """从 ACCOUNTS 环境变量加载 Linux.do 账号
 
     Returns:
         包含 linux.do 账号信息的列表，每个元素为:
@@ -420,22 +420,14 @@ def load_linuxdo_accounts() -> list[dict]:
 
         for i, account in enumerate(accounts_data):
             if not isinstance(account, dict):
+                print(f"⚠️ ACCOUNTS[{i}] must be a dictionary, skipping")
                 continue
 
-            # 检查是否有 linux.do 配置
-            linux_do_config = account.get("linux.do")
-            if not linux_do_config:
-                continue
-
-            if not isinstance(linux_do_config, dict):
-                print(f"⚠️ Account {i + 1} linux.do config must be a dictionary")
-                continue
-
-            username = linux_do_config.get("username")
-            password = linux_do_config.get("password")
+            username = account.get("username")
+            password = account.get("password")
 
             if not username or not password:
-                print(f"⚠️ Account {i + 1} linux.do missing username or password")
+                print(f"⚠️ ACCOUNTS[{i}] missing username or password, skipping")
                 continue
 
             # 根据 username 去重
@@ -457,7 +449,7 @@ def load_linuxdo_accounts() -> list[dict]:
         print(f"❌ Failed to parse ACCOUNTS: {e}")
         return []
     except Exception as e:
-        print(f"❌ Error loading accounts: {e}")
+        print(f"❌ Error loading ACCOUNTS: {e}")
         return []
 
 
