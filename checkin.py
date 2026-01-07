@@ -946,9 +946,10 @@ class CheckIn:
 
             # 检查是否需要手动签到
             if self.provider_config.needs_manual_check_in():
-                # 如果配置了签到状态查询函数，先检查是否已签到
-                if self.provider_config.has_check_in_status():
-                    checked_in_today = self.provider_config.check_in_status(
+                # 如果配置了签到状态查询，先检查是否已签到
+                check_in_status_func = self.provider_config.get_check_in_status_func()
+                if check_in_status_func:
+                    checked_in_today = check_in_status_func(
                         provider_config=self.provider_config,
                         account_config=self.account_config,
                         cookies=cookies,
@@ -962,7 +963,7 @@ class CheckIn:
                         if not check_in_result.get("success"):
                             return False, {"error": check_in_result.get("error", "Check-in failed")}
                         # 签到成功后再次查询状态（显示最新状态）
-                        self.provider_config.check_in_status(
+                        check_in_status_func(
                             provider_config=self.provider_config,
                             account_config=self.account_config,
                             cookies=cookies,

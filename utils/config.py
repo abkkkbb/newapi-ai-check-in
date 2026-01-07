@@ -43,7 +43,7 @@ class ProviderConfig:
     status_path: str = "/api/status"
     auth_state_path: str = "api/oauth/state"
     check_in_path: str | Callable[[str, str | int], str] | None = None
-    check_in_status: CheckInStatusFunc | None = None  # 签到状态查询函数，返回 bool
+    check_in_status: bool | CheckInStatusFunc = False  # 签到状态查询：True=标准检查，False=不检查，Callable=自定义函数
     user_info_path: str = "/api/user/self"
     topup_path: str | None = "/api/user/topup"
     get_cdk: CdkGetterFunc | AsyncCdkGetterFunc | None = None
@@ -72,7 +72,7 @@ class ProviderConfig:
             status_path=data.get("status_path", "/api/status"),
             auth_state_path=data.get("auth_state_path", "api/oauth/state"),
             check_in_path=data.get("check_in_path"),
-            check_in_status=data.get("check_in_status"),  # 函数类型无法从 JSON 解析，需要代码中设置
+            check_in_status=data.get("check_in_status", False),
             user_info_path=data.get("user_info_path", "/api/user/self"),
             topup_path=data.get("topup_path", "/api/user/topup"),
             get_cdk=data.get("get_cdk"),  # 函数类型无法从 JSON 解析，需要代码中设置
@@ -139,9 +139,19 @@ class ProviderConfig:
         # 否则拼接路径
         return f"{self.origin}{self.check_in_path}"
 
-    def has_check_in_status(self) -> bool:
-        """判断是否配置了签到状态查询函数"""
-        return self.check_in_status is not None
+    def get_check_in_status_func(self) -> CheckInStatusFunc | None:
+        """获取签到状态查询函数
+        
+        Returns:
+            如果 check_in_status 为 True，返回标准的 newapi_check_in_status 函数
+            如果 check_in_status 为 callable，返回该函数
+            否则返回 None
+        """
+        if self.check_in_status is True:
+            return newapi_check_in_status
+        if callable(self.check_in_status):
+            return self.check_in_status
+        return None
 
     def get_user_info_url(self) -> str:
         """获取用户信息 URL"""
@@ -349,7 +359,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/sign_in",
-                check_in_status=None,
+                check_in_status=False,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -367,7 +377,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path=None,  # 无需签到接口，查询用户信息时自动完成签到
-                check_in_status=None,
+                check_in_status=False,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -385,7 +395,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",
-                check_in_status=None,
+                check_in_status=False,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -403,7 +413,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                check_in_status=True,  # 使用标准签到状态查询
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 api_user_key="new-api-user",
@@ -421,7 +431,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                check_in_status=True,  # 使用标准签到状态查询
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=get_runawaytime_cdk,
@@ -440,7 +450,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path=None,  # 签到通过 up.x666.me 完成
-                check_in_status=None,
+                check_in_status=False,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=get_x666_cdk,
@@ -459,7 +469,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                check_in_status=True,  # 使用标准签到状态查询
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=None,
@@ -478,7 +488,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                check_in_status=True,  # 使用标准签到状态查询
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=None,
@@ -497,7 +507,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                check_in_status=True,  # 使用标准签到状态查询
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=None,
@@ -518,7 +528,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=newapi_check_in_status,  # 签到状态查询函数，返回 bool
+                check_in_status=True,  # 使用标准签到状态查询
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=None,
@@ -537,7 +547,7 @@ class AppConfig:
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
                 check_in_path=None,  # 无签到接口，通过 luckydraw 获取 CDK 并 topup
-                check_in_status=None,
+                check_in_status=False,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",
                 get_cdk=get_b4u_cdk,  # 通过 tw.b4u.qzz.io/luckydraw 抽奖获取 CDK
@@ -548,6 +558,63 @@ class AppConfig:
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method="cf_clearance",
+            ),
+            "lightllm": ProviderConfig(
+                name="lightllm",
+                origin="https://lightllm.online",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=True,  # 使用标准签到状态查询
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="i7YfDNeJPx8Rbjx8JpD10YgQ2TVElVA4",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
+            "takeapi": ProviderConfig(
+                name="takeapi",
+                origin="https://codex.661118.xyz",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=True,  # 使用标准签到状态查询
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="CeGKoyvGjd9JuUYOz57qbOqcM3ur3Y69",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
+            "thatapi": ProviderConfig(
+                name="thatapi",
+                origin="https://gyapi.zxiaoruan.cn",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=True,  # 使用标准签到状态查询
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="doAqU5TVU6L7sXudST9MQ102aaJObESS",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
             ),
         }
 
