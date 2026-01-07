@@ -18,9 +18,10 @@ from utils.get_cdk import (
 
 # 前向声明 AccountConfig 类型，用于类型注解
 # 实际的 AccountConfig 类在后面定义
-# 定义 CDK 获取函数的类型：接收 AccountConfig 参数，返回 Generator[str, None, None]
-CdkGetterFunc = Callable[["AccountConfig"], Generator[str, None, None]]
-AsyncCdkGetterFunc = Callable[["AccountConfig"], AsyncGenerator[str, None]]
+# 定义 CDK 获取函数的类型：接收 AccountConfig 参数，返回 Generator[str, None, None] 或 None
+# 返回 None 表示无法获取 CDK（如配置不完整），返回空生成器表示没有可用的 CDK
+CdkGetterFunc = Callable[["AccountConfig"], Generator[str, None, None] | None]
+AsyncCdkGetterFunc = Callable[["AccountConfig"], AsyncGenerator[str, None] | None]
 
 # 签到状态查询函数类型：接收 ProviderConfig 和 AccountConfig 参数，返回 bool（今日是否已签到）
 # 函数签名: (provider_config, account_config, cookies, headers) -> bool
@@ -438,7 +439,7 @@ class AppConfig:
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
-                check_in_path=None,  # 签到通过 qd.x666.me 完成
+                check_in_path=None,  # 签到通过 up.x666.me 完成
                 check_in_status=None,
                 user_info_path="/api/user/self",
                 topup_path="/api/user/topup",

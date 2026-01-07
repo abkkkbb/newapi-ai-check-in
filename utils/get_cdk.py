@@ -219,16 +219,17 @@ def get_runawaytime_cdk(
 
 def get_x666_cdk(
     account_config: "AccountConfig",
-) -> Generator[str, None, None]:
-    """获取 x666 抽奖 CDK
+) -> None:
+    """执行 x666 每日抽奖（直接充值到账户）
 
-    通过 qd.x666.me 抽奖获取 CDK
+    通过 up.x666.me 抽奖，奖励直接充值到账户，不返回 CDK
+    此函数作为 get_cdk 使用，但实际不会 yield 任何 CDK
 
     Args:
         account_config: 账号配置对象，需要包含 access_token 在 extra 中
 
     Yields:
-        str: CDK 字符串
+        str: 不会 yield 任何值（抽奖奖励直接充值到账户）
     """
     account_name = account_config.get_display_name()
     access_token = account_config.get("access_token")
@@ -246,7 +247,7 @@ def get_x666_cdk(
             # 构建基础请求头
             headers = {
                 "accept": "*/*",
-                "accept-language": "en,en-US;q=0.9,zh;q=0.8",
+                "accept-language": "en,en-US;q=0.9,zh;q=0.8,en-CN;q=0.7,zh-CN;q=0.6",
                 "cache-control": "no-cache",
                 "pragma": "no-cache",
                 "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
@@ -259,43 +260,44 @@ def get_x666_cdk(
             session.cookies.set("i18next", "en")
 
             # 先获取用户信息，检查是否可以抽奖
-            info_headers = headers.copy()
-            info_headers.update(
+            status_headers = headers.copy()
+            status_headers.update(
                 {
                     "authorization": f"Bearer {access_token}",
-                    "content-length": "0",
-                    "content-type": "application/json",
-                    "origin": "https://qd.x666.me",
-                    "referer": "https://qd.x666.me/",
+                    "referer": "https://up.x666.me/",
                     "sec-fetch-dest": "empty",
                     "sec-fetch-mode": "cors",
                     "sec-fetch-site": "same-origin",
                 }
             )
 
-            info_response = session.post(
-                "https://qd.x666.me/api/user/info",
-                headers=info_headers,
+            status_response = session.get(
+                "https://up.x666.me/api/checkin/status",
+                headers=status_headers,
                 timeout=30,
             )
 
-            if info_response.status_code == 200:
-                info_data = response_resolve(info_response, "get_user_info", account_name)
-                if info_data and info_data.get("success"):
-                    data = info_data.get("data", {})
-                    can_spin = data.get("can_spin", False)
+            if status_response.status_code == 200:
+                status_data = response_resolve(status_response, "get_checkin_status", account_name)
+                if status_data and status_data.get("success"):
+                    # API 响应格式：can_spin 和 today_record 直接在顶层
+                    # {"success":true,"can_spin":false,"today_record":{...},"total_quota":...}
+                    can_spin = status_data.get("can_spin", False)
 
                     if not can_spin:
-                        # 今天已经抽过，返回已有的 CDK
-                        today_record = data.get("today_record")
-                        if today_record:
-                            existing_cdk = today_record.get("cdk", "")
-                            if existing_cdk:
-                                print(f"✅ {account_name}: Already spun today, existing CDK: {existing_cdk}")
-                                yield existing_cdk
-                        else:
-                            print(f"ℹ️ {account_name}: Already spun today, no CDK available")
+                        # 今天已经抽过，显示今日奖励
+                        today_record = status_data.get("today_record")
+                        today_quota = today_record.get("quota_amount", 0)
+                        today_quota_display = round(today_quota / 500, 2)
+                        print(f"✅ {account_name}: Already spun today, today's prize: {today_quota_display}")                    
                         return
+                else:
+                    error_msg = status_data.get("message", "Unknown error") if status_data else "Invalid response"
+                    print(f"❌ {account_name}: Failed to get checkin status: {error_msg}")
+                    return
+            else:
+                print(f"❌ {account_name}: Failed to get checkin status, HTTP {status_response.status_code}")
+                return
 
             # 执行抽奖
             spin_headers = headers.copy()
@@ -304,8 +306,8 @@ def get_x666_cdk(
                     "authorization": f"Bearer {access_token}",
                     "content-length": "0",
                     "content-type": "application/json",
-                    "origin": "https://qd.x666.me",
-                    "referer": "https://qd.x666.me/",
+                    "origin": "https://up.x666.me",
+                    "referer": "https://up.x666.me/",
                     "sec-fetch-dest": "empty",
                     "sec-fetch-mode": "cors",
                     "sec-fetch-site": "same-origin",
@@ -313,7 +315,7 @@ def get_x666_cdk(
             )
 
             response = session.post(
-                "https://qd.x666.me/api/lottery/spin",
+                "https://up.x666.me/api/checkin/spin",
                 headers=spin_headers,
                 timeout=30,
             )
@@ -324,24 +326,25 @@ def get_x666_cdk(
                     return
 
                 if json_data.get("success"):
-                    data = json_data.get("data", {})
-                    cdk = data.get("cdk", "")
-                    if cdk:
-                        label = data.get("label", "Unknown")
-                        print(f"✅ {account_name}: Spin successful! Prize: {label}, CDK: {cdk}")
-                        yield cdk
-                        return
+                    # 新 API 响应格式：直接充值到账户
+                    # {"success":true,"level":6,"times":150,"quota":75000,"label":"150次","new_balance":33497000,"message":"恭喜获得 150次！"}
+                    message = json_data.get("message", "")                   
+                    
+                    print(f"✅ {account_name}: Spin successful! {message}")
+                    return
 
                 message = json_data.get("message", json_data.get("msg", ""))
-                if "already" in message.lower() or "已经" in message or "已抽" in message:
-                    print(f"✅ {account_name}: Already spun today")
+                if "already" in message.lower() or "已签到" in message:
+                    print(f"✅ {account_name}: Already spun today, {message}")
                     return
 
                 print(f"❌ {account_name}: Spin failed - {message}")
+            else:
+                print(f"❌ {account_name}: Spin failed, HTTP {response.status_code}")
         finally:
             session.close()
     except Exception as e:
-        print(f"❌ {account_name}: Error getting x666 CDK - {e}")
+        print(f"❌ {account_name}: Error executing x666 spin - {e}")
 
 
 async def get_b4u_cdk(

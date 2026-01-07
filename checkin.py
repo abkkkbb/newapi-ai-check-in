@@ -843,8 +843,14 @@ class CheckIn:
             "error": "",
         }
 
-        # 调用 get_cdk 函数，可能返回同步生成器或异步生成器
+        # 调用 get_cdk 函数，可能返回同步生成器、异步生成器或 None
         cdk_generator = self.provider_config.get_cdk(self.account_config)
+        
+        # 如果返回 None，表示无法获取 CDK（如配置不完整）
+        if cdk_generator is None:
+            print(f"ℹ️ {self.account_name}: get_cdk returned None, skipping topup")
+            return results
+        
         topup_count = 0
         error_msg = ""
 
