@@ -32,7 +32,7 @@ class CheckIn:
         self.global_proxy = global_proxy
         self.http_proxy_config = proxy_resolve(global_proxy)
 
-    def execute_check_in(self, session: curl_requests.Session, headers: dict, auth_token: str) -> bool:
+    def execute_check_in(self, session: curl_requests.Session, headers: dict, auth_token: str) -> tuple[bool, str]:
         """执行签到请求
 
         Args:
@@ -41,7 +41,7 @@ class CheckIn:
             auth_token: Bearer token
 
         Returns:
-            签到是否成功
+            (签到是否成功, 错误信息或成功信息)
         """
         print(f"🌐 {self.account_name}: Executing check-in")
 
@@ -67,7 +67,7 @@ class CheckIn:
             json_data = response_resolve(response, "execute_check_in", self.account_name)
             if json_data is None:
                 print(f"❌ {self.account_name}: Check-in failed - Invalid response format")
-                return False
+                return False, "Invalid response format"
 
             # 检查签到结果
             message = json_data.get("message", json_data.get("msg", ""))
@@ -78,14 +78,14 @@ class CheckIn:
                     print(f"✅ {self.account_name}: Already checked in today!")
                 else:
                     print(f"✅ {self.account_name}: Check-in successful!")
-                return True
+                return True, "Check-in successful"
             else:
                 error_msg = message if message else "Unknown error"
                 print(f"❌ {self.account_name}: Check-in failed - {error_msg}")
-                return False
+                return False, error_msg
         else:
             print(f"❌ {self.account_name}: Check-in failed - HTTP {response.status_code}")
-            return False
+            return False, f"HTTP error with code {response.status_code}"
 
     def get_checkin_info(self, session: curl_requests.Session, headers: dict, auth_token: str) -> dict | None:
         """获取签到信息
@@ -169,7 +169,7 @@ class CheckIn:
             }
 
             # 执行签到
-            success = self.execute_check_in(session, headers, auth_token)
+            success, error_msg = self.execute_check_in(session, headers, auth_token)
 
             if success:
                 user_info = self.get_checkin_info(session, headers, auth_token)
@@ -177,7 +177,7 @@ class CheckIn:
                     return False, {"error": "Failed to retrieve user info after check-in"}
                 return True, user_info
             else:
-                return False, {"error": "Check-in failed"}
+                return False, {"error": f"Check-in failed, {error_msg}"}
 
         except Exception as e:
             print(f"❌ {self.account_name}: Error occurred during check-in process - {e}")
