@@ -257,7 +257,6 @@ class LinuxDoSignIn:
                                 f"Current page is: {page.url}"
                             )
                             await take_screenshot(page, "linuxdo_authorization_failed", self.account_name)
-                            return False, {"error": "Linux.do authorization failed"}, None
 
                     # 从 localStorage 获取 user 对象并提取 id
                     api_user = None
