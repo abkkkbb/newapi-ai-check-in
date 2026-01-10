@@ -125,6 +125,10 @@ async def get_cf_clearance(
                 
                 return cf_cookies, browser_headers
                 
+            except Exception as e:
+                print(f"⚠️ {account_name}: Error getting cf_clearance: {e}")
+                return None, None
+            
             finally:
                 await page.close()
 

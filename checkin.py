@@ -843,21 +843,40 @@ class CheckIn:
             "error": "",
         }
 
-        # 调用 get_cdk 函数，可能返回同步生成器、异步生成器或 None
+        # 调用 get_cdk 函数，返回同步生成器或异步生成器
         cdk_generator = self.provider_config.get_cdk(self.account_config)
-        
-        # 如果返回 None，表示无法获取 CDK（如配置不完整）
-        if cdk_generator is None:
-            print(f"ℹ️ {self.account_name}: get_cdk returned None, skipping topup")
-            return results
         
         topup_count = 0
         error_msg = ""
 
-        # 内部函数：处理单个 CDK 的 topup
-        async def process_cdk(cdk: str) -> bool:
-            """处理单个 CDK，返回是否应该继续"""
+        # 内部函数：处理单个 CDK 结果
+        async def process_cdk_result(success: bool, data: dict) -> bool:
+            """处理单个 CDK 结果，返回是否应该继续
+            
+            Args:
+                success: 是否成功获取 CDK
+                data: 包含 code 或 error 的字典
+                
+            Returns:
+                bool: True 继续处理下一个，False 停止处理
+            """
             nonlocal topup_count, error_msg
+            
+            # 如果获取 CDK 失败，停止处理
+            if not success:
+                error_msg = data.get("error", "Failed to get CDK")
+                results["success"] = False
+                results["error"] = error_msg
+                print(f"❌ {self.account_name}: Failed to get CDK - {error_msg}, stopping topup process")
+                return False
+            
+            # 获取 code
+            cdk = data.get("code", "")
+            
+            # 如果 code 为空，表示不需要充值，继续处理下一个
+            if not cdk:
+                print(f"ℹ️ {self.account_name}: No CDK to topup (code is empty), continuing...")
+                return True
             
             # 如果不是第一个 CDK，等待间隔时间
             if topup_count > 0 and topup_interval > 0:
@@ -893,14 +912,14 @@ class CheckIn:
         # 检查是否是异步生成器
         if inspect.isasyncgen(cdk_generator):
             # 异步生成器，使用 async for
-            async for cdk in cdk_generator:
-                should_continue = await process_cdk(cdk)
+            async for success, data in cdk_generator:
+                should_continue = await process_cdk_result(success, data)
                 if not should_continue:
                     break
         else:
             # 同步生成器，使用普通 for
-            for cdk in cdk_generator:
-                should_continue = await process_cdk(cdk)
+            for success, data in cdk_generator:
+                should_continue = await process_cdk_result(success, data)
                 if not should_continue:
                     break
 

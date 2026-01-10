@@ -18,10 +18,12 @@ from utils.get_cdk import (
 
 # 前向声明 AccountConfig 类型，用于类型注解
 # 实际的 AccountConfig 类在后面定义
-# 定义 CDK 获取函数的类型：接收 AccountConfig 参数，返回 Generator[str, None, None] 或 None
-# 返回 None 表示无法获取 CDK（如配置不完整），返回空生成器表示没有可用的 CDK
-CdkGetterFunc = Callable[["AccountConfig"], Generator[str, None, None] | None]
-AsyncCdkGetterFunc = Callable[["AccountConfig"], AsyncGenerator[str, None] | None]
+# 定义 CDK 获取函数的类型：接收 AccountConfig 参数，返回 Generator[tuple[bool, dict], None, None]
+# 每次 yield 一个元组：
+#   - (True, {"code": "xxx"}) 表示成功获取 CDK，code 可为空字符串表示不需要充值
+#   - (False, {"error": "error message"}) 表示失败，调用方应停止 topup
+CdkGetterFunc = Callable[["AccountConfig"], Generator[tuple[bool, dict], None, None]]
+AsyncCdkGetterFunc = Callable[["AccountConfig"], AsyncGenerator[tuple[bool, dict], None]]
 
 # 签到状态查询函数类型：接收 ProviderConfig 和 AccountConfig 参数，返回 bool（今日是否已签到）
 # 函数签名: (provider_config, account_config, cookies, headers) -> bool

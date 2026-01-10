@@ -3,8 +3,10 @@
 CDK 获取模块
 
 提供各个 provider 的 CDK 获取函数
-同步函数返回 Generator[str, None, None]，每次 yield 一个 CDK 字符串
-异步函数返回 AsyncGenerator[str, None]，每次 yield 一个 CDK 字符串
+同步函数返回 Generator[tuple[bool, dict], None, None]，每次 yield 一个元组：
+  - (True, {"code": "xxx"}) 表示成功获取 CDK，code 可为空字符串表示不需要充值
+  - (False, {"error": "error message"}) 表示失败，调用方应停止 topup
+异步函数返回 AsyncGenerator[tuple[bool, dict], None]，格式同上
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
 
 def get_runawaytime_cdk(
     account_config: "AccountConfig",
-) -> Generator[str, None, None]:
+) -> Generator[tuple[bool, dict], None, None]:
     """获取 runawaytime CDK（签到 + 大转盘）
 
     通过 fuli.hxi.me 签到和大转盘获取 CDK
@@ -31,7 +33,7 @@ def get_runawaytime_cdk(
         account_config: 账号配置对象，需要包含 get_cdk_cookies 在 extra 中
 
     Yields:
-        str: CDK 字符串
+        tuple[bool, dict]: (True, {"code": "xxx"}) 成功，(False, {"error": "msg"}) 失败
     """
     account_name = account_config.get_display_name()
     
@@ -40,6 +42,7 @@ def get_runawaytime_cdk(
 
     if not get_cdk_cookies:
         print(f"❌ {account_name}: get_cdk_cookies not found in account config")
+        yield False, {"error": "get_cdk_cookies not found in account config"}
         return
 
     # 代理优先级: 账号配置 > 全局配置
@@ -118,7 +121,7 @@ def get_runawaytime_cdk(
                             code = json_data.get("code", "")
                             if code:
                                 print(f"✅ {account_name}: Checkin successful! Code: {code}")
-                                yield code
+                                yield True, {"code": code}
                         else:
                             message = json_data.get("message", json_data.get("msg", ""))
                             if "already" in message.lower() or "已经" in message or "已签" in message:
@@ -191,7 +194,7 @@ def get_runawaytime_cdk(
                                 print(
                                     f"✅ {account_name}: Wheel spin #{spin_count} successful! Code: {code}, remaining: {remaining}"
                                 )
-                                yield code
+                                yield True, {"code": code}
                                 continue
 
                         message = json_data.get("message", json_data.get("msg", ""))
@@ -215,21 +218,22 @@ def get_runawaytime_cdk(
             session.close()
     except Exception as e:
         print(f"❌ {account_name}: Error getting runawaytime CDK - {e}")
+        yield False, {"error": f"Error getting runawaytime CDK - {e}"}
 
 
 def get_x666_cdk(
     account_config: "AccountConfig",
-) -> None:
+) -> Generator[tuple[bool, dict], None, None]:
     """执行 x666 每日抽奖（直接充值到账户）
 
     通过 up.x666.me 抽奖，奖励直接充值到账户，不返回 CDK
-    此函数作为 get_cdk 使用，但实际不会 yield 任何 CDK
+    此函数作为 get_cdk 使用，成功时返回空 code 表示不需要充值
 
     Args:
         account_config: 账号配置对象，需要包含 access_token 在 extra 中
 
     Yields:
-        str: 不会 yield 任何值（抽奖奖励直接充值到账户）
+        tuple[bool, dict]: (True, {"code": ""}) 成功（不需要充值），(False, {"error": "msg"}) 失败
     """
     account_name = account_config.get_display_name()
     access_token = account_config.get("access_token")
@@ -237,6 +241,7 @@ def get_x666_cdk(
 
     if not access_token:
         print(f"❌ {account_name}: access_token not found in account config")
+        yield False, {"error": "access_token not found in account config"}
         return
 
     http_proxy = proxy_resolve(proxy)
@@ -289,14 +294,18 @@ def get_x666_cdk(
                         today_record = status_data.get("today_record")
                         today_quota = today_record.get("quota_amount", 0)
                         today_quota_display = round(today_quota / 500, 2)
-                        print(f"✅ {account_name}: Already spun today, today's prize: {today_quota_display}")                    
+                        print(f"✅ {account_name}: Already spun today, today's prize: {today_quota_display}")
+                        # 已经抽过，返回成功但 code 为空表示不需要充值
+                        yield True, {"code": ""}
                         return
                 else:
                     error_msg = status_data.get("message", "Unknown error") if status_data else "Invalid response"
                     print(f"❌ {account_name}: Failed to get checkin status: {error_msg}")
+                    yield False, {"error": f"Failed to get checkin status: {error_msg}"}
                     return
             else:
                 print(f"❌ {account_name}: Failed to get checkin status, HTTP {status_response.status_code}")
+                yield False, {"error": f"Failed to get checkin status, HTTP {status_response.status_code}"}
                 return
 
             # 执行抽奖
@@ -328,28 +337,35 @@ def get_x666_cdk(
                 if json_data.get("success"):
                     # 新 API 响应格式：直接充值到账户
                     # {"success":true,"level":6,"times":150,"quota":75000,"label":"150次","new_balance":33497000,"message":"恭喜获得 150次！"}
-                    message = json_data.get("message", "")                   
+                    message = json_data.get("message", "")
                     
                     print(f"✅ {account_name}: Spin successful! {message}")
+                    # 成功，返回空 code 表示不需要充值（奖励已直接充值到账户）
+                    yield True, {"code": ""}
                     return
 
                 message = json_data.get("message", json_data.get("msg", ""))
                 if "already" in message.lower() or "已签到" in message:
                     print(f"✅ {account_name}: Already spun today, {message}")
+                    # 已经抽过，返回成功但 code 为空
+                    yield True, {"code": ""}
                     return
 
                 print(f"❌ {account_name}: Spin failed - {message}")
+                yield False, {"error": f"Spin failed - {message}"}
             else:
                 print(f"❌ {account_name}: Spin failed, HTTP {response.status_code}")
+                yield False, {"error": f"Spin failed, HTTP {response.status_code}"}
         finally:
             session.close()
     except Exception as e:
         print(f"❌ {account_name}: Error executing x666 spin - {e}")
+        yield False, {"error": f"Error executing x666 spin - {e}"}
 
 
 async def get_b4u_cdk(
     account_config: "AccountConfig",
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[tuple[bool, dict], None]:
     """获取 b4u 抽奖 CDK（异步生成器）
 
     通过 tw.b4u.qzz.io/luckydraw 抽奖获取 CDK
@@ -359,13 +375,14 @@ async def get_b4u_cdk(
         account_config: 账号配置对象，需要包含 get_cdk_cookies 在 extra 中
 
     Yields:
-        str: CDK 字符串（redemptionCode）
+        tuple[bool, dict]: (True, {"code": "xxx"}) 成功，(False, {"error": "msg"}) 失败
     """
     account_name = account_config.get_display_name()
     get_cdk_cookies = account_config.get("get_cdk_cookies")
 
     if not get_cdk_cookies:
         print(f"❌ {account_name}: get_cdk_cookies not found in account config")
+        yield False, {"error": "get_cdk_cookies not found in account config"}
         return
 
     # 代理优先级: 账号配置 > 全局配置
@@ -382,10 +399,12 @@ async def get_b4u_cdk(
         )
     except Exception as e:
         print(f"❌ {account_name}: Failed to get cf_clearance: {e}")
+        yield False, {"error": f"Failed to get cf_clearance: {e}"}
         return
 
     if not cf_cookies or "cf_clearance" not in cf_cookies:
         print(f"❌ {account_name}: Failed to get cf_clearance for tw.b4u.qzz.io, cannot proceed")
+        yield False, {"error": "Failed to get cf_clearance for tw.b4u.qzz.io"}
         return
 
     # 根据浏览器指纹选择 impersonate
@@ -489,6 +508,8 @@ async def get_b4u_cdk(
 
             if remaining <= 0:
                 print(f"ℹ️ {account_name}: No draws remaining today")
+                # 没有抽奖次数，返回成功但 code 为空
+                yield True, {"code": ""}
                 return
 
             # ===== 第二步：循环执行抽奖直到次数用完 =====
@@ -534,7 +555,7 @@ async def get_b4u_cdk(
                                             print(
                                                 f"✅ {account_name}: Luckydraw #{draw_count} successful! Prize: {prize_name}, Code: {redemption_code}, remaining: {remaining}"
                                             )
-                                            yield redemption_code
+                                            yield True, {"code": redemption_code}
                                         else:
                                             print(
                                                 f"⚠️ {account_name}: Luckydraw successful but no redemption code: {message}"
@@ -543,6 +564,7 @@ async def get_b4u_cdk(
                                     else:
                                         message = json_data.get("message", "Unknown error")
                                         print(f"❌ {account_name}: Luckydraw failed - {message}")
+                                        yield False, {"error": f"Luckydraw failed - {message}"}
                                         remaining = 0  # 失败时停止
                                         break
                             except json.JSONDecodeError:
@@ -562,6 +584,7 @@ async def get_b4u_cdk(
                         remaining = 0
                 else:
                     print(f"❌ {account_name}: Luckydraw failed - HTTP {response.status_code}")
+                    yield False, {"error": f"Luckydraw failed - HTTP {response.status_code}"}
                     remaining = 0
 
             if draw_count > 0:
@@ -570,3 +593,4 @@ async def get_b4u_cdk(
             session.close()
     except Exception as e:
         print(f"❌ {account_name}: Error getting b4u CDK - {e}")
+        yield False, {"error": f"Error getting b4u CDK - {e}"}
