@@ -29,10 +29,7 @@ AsyncCdkGetterFunc = Callable[["AccountConfig"], AsyncGenerator[tuple[bool, dict
 # 函数签名: (provider_config, account_config, cookies, headers) -> bool
 # 代理配置从 account_config.proxy 或 account_config.get("global_proxy") 获取
 # headers 中已包含 api_user_key，无需单独传递 api_user
-CheckInStatusFunc = Callable[
-    ["ProviderConfig", "AccountConfig", dict, dict],
-    bool
-]
+CheckInStatusFunc = Callable[["ProviderConfig", "AccountConfig", dict, dict], bool]
 
 
 @dataclass
@@ -103,7 +100,7 @@ class ProviderConfig:
 
     def needs_manual_topup(self) -> bool:
         """判断是否需要手动执行充值（通过 CDK）
-        
+
         当同时配置了 topup_path 和 get_cdk 时，需要执行 execute_topup
         """
         return self.topup_path is not None and self.get_cdk is not None
@@ -143,7 +140,7 @@ class ProviderConfig:
 
     def get_check_in_status_func(self) -> CheckInStatusFunc | None:
         """获取签到状态查询函数
-        
+
         Returns:
             如果 check_in_status 为 True，返回标准的 newapi_check_in_status 函数
             如果 check_in_status 为 callable，返回该函数
@@ -171,7 +168,7 @@ class ProviderConfig:
 
     def get_github_auth_redirect_pattern(self) -> str:
         """获取 GitHub OAuth 回调 URL 匹配模式
-        
+
         返回用于 page.wait_for_url() 的匹配模式，支持通配符 **
         例如: "**https://example.com/oauth/**" 或 "**https://example.com/oauth-redirect.html**"
         """
@@ -183,15 +180,17 @@ class ProviderConfig:
 
     def get_linuxdo_auth_redirect_pattern(self) -> str:
         """获取 LinuxDo OAuth 回调 URL 匹配模式
-        
+
         返回用于 page.wait_for_url() 的匹配模式，支持通配符 **
         例如: "**https://example.com/oauth/**" 或 "**https://example.com/oauth-redirect.html**"
         """
         return f"**{self.origin}{self.linuxdo_auth_redirect_path}"
 
+
 @dataclass
 class OAuthAccountConfig:
     """OAuth 账号配置（用于 linux.do 和 github）"""
+
     username: str
     password: str
 
@@ -225,7 +224,7 @@ class AccountConfig:
         github_accounts: List["OAuthAccountConfig"] | None = None,
     ) -> "AccountConfig":
         """从字典创建 AccountConfig
-        
+
         Args:
             data: 账号配置字典
             linux_do_accounts: 解析后的 Linux.do OAuth 账号列表（可选）
@@ -256,7 +255,7 @@ class AccountConfig:
 
     def get_display_name(self, index: int = 0) -> str:
         """获取显示名称
-        
+
         如果设置了 name 则返回 name，否则返回 "{provider} {index + 1}"
         """
         return self.name if self.name else f"{self.provider} {index + 1}"
@@ -289,7 +288,7 @@ class AppConfig:
         proxy_env: str = "PROXY",
     ) -> "AppConfig":
         """从环境变量加载配置
-        
+
         Args:
             providers_env: 自定义 providers 配置的环境变量名称，默认为 "PROVIDERS"
             accounts_env: 账号配置的环境变量名称，默认为 "ACCOUNTS"
@@ -321,10 +320,10 @@ class AppConfig:
     @classmethod
     def _load_proxy(cls, proxy_env: str) -> Dict | None:
         """从环境变量加载全局代理配置
-        
+
         Args:
             proxy_env: 环境变量名称
-        
+
         Returns:
             代理配置字典，如果未配置则返回 None
         """
@@ -346,10 +345,10 @@ class AppConfig:
     @classmethod
     def _load_providers(cls, providers_env: str) -> Dict[str, ProviderConfig]:
         """从环境变量加载 providers 配置
-        
+
         Args:
             providers_env: 环境变量名称
-        
+
         Returns:
             providers 配置字典
         """
@@ -713,25 +712,6 @@ class AppConfig:
                 aliyun_captcha=False,
                 bypass_method=None,
             ),
-            "xuezha": ProviderConfig(
-                name="xuezha",
-                origin="https://gptkey.eu.org",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=True,  # 使用标准签到状态查询
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                get_cdk=None,
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="GQbxiQJyJbl2e5yCYZTQx6tv99cY3ed6",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method=None,
-            ),
         }
 
         # 尝试从环境变量加载自定义 providers
@@ -766,16 +746,16 @@ class AppConfig:
     @classmethod
     def _load_oauth_accounts(cls, env_name: str, provider_name: str) -> List["OAuthAccountConfig"]:
         """从环境变量加载 OAuth 账号配置
-        
+
         Args:
             env_name: 环境变量名称
             provider_name: 提供商名称（用于日志输出）
-        
+
         Returns:
             OAuth 账号配置列表
         """
         accounts_str = os.getenv(env_name)
-        
+
         if not accounts_str:
             print(f"⚠️ {env_name} No {provider_name} account(s) from {env_name}")
             return []
@@ -808,7 +788,7 @@ class AppConfig:
 
             if accounts:
                 print(f"⚙️ Loaded {len(accounts)} {provider_name} account(s) from {env_name}")
-            
+
             return accounts
         except json.JSONDecodeError as e:
             print(f"⚠️ Failed to parse {env_name}: {e}")
@@ -826,13 +806,13 @@ class AppConfig:
         account_index: int,
     ) -> List["OAuthAccountConfig"] | None:
         """解析 OAuth 配置，支持 bool、单个账号、多个账号三种格式
-        
+
         Args:
             config_value: 配置值，可以是 bool、dict 或 list
             global_accounts: 全局 OAuth 账号列表
             config_name: 配置名称（用于日志输出，如 "linux.do" 或 "github"）
             account_index: 账号索引（用于日志输出）
-        
+
         Returns:
             OAuth 账号配置列表，如果配置无效则返回 None
         """
@@ -840,12 +820,14 @@ class AppConfig:
         if isinstance(config_value, bool):
             if config_value:
                 if not global_accounts:
-                    print(f"⚠️ Account {account_index + 1} {config_name}=true but no global {config_name} accounts configured")
+                    print(
+                        f"⚠️ Account {account_index + 1} {config_name}=true but no global {config_name} accounts configured"
+                    )
                     return []
                 return global_accounts.copy()
             else:
                 return []
-        
+
         # dict 类型：单个账号
         if isinstance(config_value, dict):
             # 验证必需字段
@@ -859,7 +841,7 @@ class AppConfig:
                 return None
 
             return [OAuthAccountConfig.from_dict(config_value)]
-        
+
         # list 类型：多个账号
         if isinstance(config_value, list):
             accounts = []
@@ -880,7 +862,7 @@ class AppConfig:
 
                 accounts.append(OAuthAccountConfig.from_dict(item))
             return accounts
-        
+
         print(f"❌ Account {account_index + 1} {config_name} configuration must be bool, dict, or array")
         return None
 
@@ -892,19 +874,19 @@ class AppConfig:
         global_github_accounts: List["OAuthAccountConfig"],
     ) -> List["AccountConfig"]:
         """从环境变量加载多账号配置
-        
+
         Args:
             accounts_env: 环境变量名称或直接的 JSON 字符串值
                          优先尝试作为环境变量名获取，获取不到则作为值使用
             global_linux_do_accounts: 全局 Linux.do 账号列表
             global_github_accounts: 全局 GitHub 账号列表
-        
+
         Returns:
             账号配置列表，如果加载失败则返回空列表
         """
         # 从环境变量获取账号配置
         accounts_str = os.getenv(accounts_env)
-        
+
         if not accounts_str:
             print(f"⚠️ {accounts_env} environment variable not found")
             return []
@@ -967,7 +949,7 @@ class AppConfig:
                 if has_cookies:
                     cookies_config = account.get("cookies")
                     api_user = account.get("api_user")
-                    
+
                     if cookies_config and api_user:
                         valid_cookies = True
                     elif cookies_config and not api_user:
@@ -981,7 +963,9 @@ class AppConfig:
                 has_valid_cookies = valid_cookies
 
                 if not has_valid_linux_do and not has_valid_github and not has_valid_cookies:
-                    print(f"⚠️ {account_name} must have at least one valid authentication method (linux.do, github, or cookies), skipping")
+                    print(
+                        f"⚠️ {account_name} must have at least one valid authentication method (linux.do, github, or cookies), skipping"
+                    )
                     continue
 
                 # 创建 AccountConfig，传入解析后的 OAuth 账号列表
@@ -999,4 +983,3 @@ class AppConfig:
     def get_provider(self, name: str) -> ProviderConfig | None:
         """获取指定 provider 配置"""
         return self.providers.get(name)
-
