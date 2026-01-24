@@ -55,14 +55,20 @@ class ProviderConfig:
     linuxdo_auth_redirect_path: str = "/oauth/**"  # OAuth 回调路径匹配模式，支持通配符
     aliyun_captcha: bool = False
     bypass_method: Literal["waf_cookies", "cf_clearance"] | None = None
+    isCustomize: bool = False  # 是否为自定义 provider（从环境变量加载）
 
     @classmethod
-    def from_dict(cls, name: str, data: dict) -> "ProviderConfig":
+    def from_dict(cls, name: str, data: dict, is_customize: bool = False) -> "ProviderConfig":
         """从字典创建 ProviderConfig
 
         配置格式:
         - 基础: {"origin": "https://example.com"}
         - 完整: {"origin": "https://example.com", "login_path": "/login", "api_user_key": "x-api-user", "bypass_method": "waf_cookies", ...}
+
+        Args:
+            name: provider 名称
+            data: 配置数据字典
+            is_customize: 是否为自定义 provider（从环境变量加载）
         """
         return cls(
             name=name,
@@ -84,6 +90,7 @@ class ProviderConfig:
             linuxdo_auth_redirect_path=data.get("linuxdo_auth_redirect_path", "/oauth/**"),
             aliyun_captcha=data.get("aliyun_captcha", False),
             bypass_method=data.get("bypass_method"),
+            isCustomize=is_customize,
         )
 
     def needs_waf_cookies(self) -> bool:
@@ -306,6 +313,11 @@ class AppConfig:
         # 加载账号配置（传入全局 OAuth 账号用于解析 bool 类型配置）
         accounts = cls._load_accounts(accounts_env, linux_do_accounts, github_accounts)
 
+        # 自动为自定义 provider 添加账号（如果 accounts 中没有对应的 provider）
+        accounts = cls._auto_add_accounts_for_custom_providers(
+            providers, accounts, linux_do_accounts, github_accounts
+        )
+
         # 加载全局代理配置
         global_proxy = cls._load_proxy(proxy_env)
 
@@ -316,6 +328,76 @@ class AppConfig:
             github_accounts=github_accounts,
             global_proxy=global_proxy,
         )
+
+    @classmethod
+    def _auto_add_accounts_for_custom_providers(
+        cls,
+        providers: Dict[str, ProviderConfig],
+        accounts: List["AccountConfig"],
+        global_linux_do_accounts: List["OAuthAccountConfig"],
+        global_github_accounts: List["OAuthAccountConfig"],
+    ) -> List["AccountConfig"]:
+        """为自定义 provider 自动添加账号
+
+        检查所有 isCustomize=True 的 provider，如果 accounts 中没有对应的账号，
+        则根据 provider 的 linuxdo_client_id 或 github_client_id 自动创建账号
+
+        Args:
+            providers: provider 配置字典
+            accounts: 现有账号列表
+            global_linux_do_accounts: 全局 Linux.do 账号列表
+            global_github_accounts: 全局 GitHub 账号列表
+
+        Returns:
+            更新后的账号列表
+        """
+        # 获取所有已存在的 provider 名称
+        existing_providers = {account.provider for account in accounts}
+
+        # 遍历所有自定义 provider
+        for provider_name, provider_config in providers.items():
+            if not provider_config.isCustomize:
+                continue
+
+            # 如果该 provider 已经在 accounts 中，跳过
+            if provider_name in existing_providers:
+                print(f"ℹ️ Custom provider '{provider_name}' already has account(s), skipping auto-add")
+                continue
+
+            # 检查是否有可用的认证方式
+            has_linuxdo = provider_config.linuxdo_client_id and global_linux_do_accounts
+            has_github = provider_config.github_client_id and global_github_accounts
+
+            if not has_linuxdo and not has_github:
+                print(
+                    f"⚠️ Custom provider '{provider_name}' has no authentication method "
+                    f"(no linuxdo_client_id/github_client_id or no global accounts), skipping auto-add"
+                )
+                continue
+
+            # 创建新账号配置
+            new_account_data = {
+                "provider": provider_name,
+                "name": f"{provider_name} (auto-added)",
+            }
+
+            # 直接复制全局账号列表
+            linux_do_accounts = None
+            github_accounts = None
+
+            if has_linuxdo:
+                linux_do_accounts = global_linux_do_accounts.copy()
+                print(f"✅ Auto-adding account for custom provider '{provider_name}' with Linux.do authentication")
+
+            if has_github:
+                github_accounts = global_github_accounts.copy()
+                print(f"✅ Auto-adding account for custom provider '{provider_name}' with GitHub authentication")
+
+            # 创建 AccountConfig
+            new_account = AccountConfig.from_dict(new_account_data, linux_do_accounts, github_accounts)
+            accounts.append(new_account)
+
+        return accounts
 
     @classmethod
     def _load_proxy(cls, proxy_env: str) -> Dict | None:
@@ -712,6 +794,25 @@ class AppConfig:
                 aliyun_captcha=False,
                 bypass_method=None,
             ),
+            "chengtx": ProviderConfig(
+                name="chengtx",
+                origin="https://api.chengtx.vip",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=True,  # 使用标准签到状态查询
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="pVtvkPeJx1z4OjEmBSHj3rnMvw1lF4Vb",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
         }
 
         # 尝试从环境变量加载自定义 providers
@@ -728,7 +829,7 @@ class AppConfig:
                 # 解析自定义 providers,会覆盖默认配置
                 for name, provider_data in providers_data.items():
                     try:
-                        providers[name] = ProviderConfig.from_dict(name, provider_data)
+                        providers[name] = ProviderConfig.from_dict(name, provider_data, is_customize=True)
                     except Exception as e:
                         print(f'⚠️ Failed to parse provider "{name}": {e}, skipping')
                         continue

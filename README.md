@@ -152,7 +152,7 @@ Affs:
 #### 3.3 字段说明：
 
 - `name` (可选)：自定义账号显示名称，用于通知和日志中标识账号
-- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`、`lightllm`、`takeapi`、`thatapi`、`duckcoding`、`free-duckcoding`、`taizi`、`openai-test`、`icat`，默认使用 `anyrouter`
+- `provider` (可选)：供应商，内置 `anyrouter`、`agentrouter`、`wong`、`huan666`、`x666`、`runawaytime`、`kfc`、`neb`、`elysiver`、`hotaru`、`b4u`、`lightllm`、`takeapi`、`thatapi`、`duckcoding`、`free-duckcoding`、`taizi`、`openai-test`、`icat`、`chengtx`，默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
 - `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数
@@ -170,6 +170,7 @@ Affs:
 在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
    - Name: `PROVIDERS`
    - Value: 供应商
+   - 说明: 自定义的 provider 会自动添加到账号中执行（在账号配置中没有使用自定义 provider 情况下）。
 
 
 #### 3.5 代理配置
@@ -275,6 +276,9 @@ Affs:
 
 - `TELEGRAM_BOT_TOKEN`: Telegram 机器人的 Token
 - `TELEGRAM_CHAT_ID`: 接收消息的 Chat ID
+
+## 防止Action因长时间无活动而自动禁止
+- `ACTIONS_TRIGGER_PAT`: 在Github Settings -> Developer Settings -> Personal access tokens -> Tokens(classic) 中新建一个包含repo和workflow的令牌
 
 配置步骤：
 

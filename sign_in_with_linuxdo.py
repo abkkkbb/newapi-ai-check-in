@@ -209,6 +209,33 @@ class LinuxDoSignIn:
                         if allow_btn_ele:
                             print(f"✅ {self.account_name}: Approve button found, proceeding to authorization")
                             await allow_btn_ele.click()
+
+                            # 在等待重定向之前，先检查是否遇到 Cloudflare 挑战
+                            try:
+                                print(f"ℹ️ {self.account_name}: Checking for Cloudflare challenge after authorization...")
+                                await page.wait_for_timeout(3000)  # 等待页面响应
+
+                                page_title = await page.title()
+                                page_content = await page.content()
+                                current_url = page.url
+
+                                # 检查 URL 中是否包含 Cloudflare 挑战参数或页面内容
+                                if "__cf_chl_rt_tk" in current_url or "Just a moment" in page_title or "Checking your browser" in page_content:
+                                    cloudflare_challenge_detected = True
+                                    print(f"ℹ️ {self.account_name}: Cloudflare challenge detected before redirect, auto-solving...")
+                                    try:
+                                        await solver.solve_captcha(
+                                            captcha_container=page, captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
+                                        )
+                                        print(f"✅ {self.account_name}: Cloudflare challenge auto-solved")
+                                        await page.wait_for_timeout(5000)
+                                    except Exception as solve_err:
+                                        print(f"⚠️ {self.account_name}: Auto-solve failed: {solve_err}")
+                                else:
+                                    print(f"ℹ️ {self.account_name}: No Cloudflare challenge detected, proceeding to redirect")
+                                    
+                            except Exception as e:
+                                print(f"⚠️ {self.account_name}: Error checking Cloudflare challenge: {e}")
                         else:
                             print(f"❌ {self.account_name}: Approve button not found")
                             await take_screenshot(page, "approve_button_not_found_bypass", self.account_name)

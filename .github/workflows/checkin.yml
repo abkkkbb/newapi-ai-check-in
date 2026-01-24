@@ -9,6 +9,11 @@ on:
         required: false
         type: string
         default: ''
+      providers:
+        description: '自定义 Provider 配置 (JSON 格式，可选，不填则使用 secrets.PROVIDERS)'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   checkin:
@@ -99,7 +104,7 @@ jobs:
         ACCOUNTS: ${{ inputs.accounts || secrets.ACCOUNTS }}
         ACCOUNTS_LINUX_DO: ${{ secrets.ACCOUNTS_LINUX_DO }}
         ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
-        PROVIDERS: ${{ secrets.PROVIDERS }}
+        PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
         PROXY: ${{secrets.PROXY}}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -110,6 +115,8 @@ jobs:
         SERVERPUSHKEY: ${{ secrets.SERVERPUSHKEY }}
         FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         WEIXIN_WEBHOOK: ${{ secrets.WEIXIN_WEBHOOK }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       run: |
         # 列出 storage-states 目录文件
         if (Test-Path "storage-states") {
