@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from camoufox.async_api import AsyncCamoufox
 from utils.browser_utils import take_screenshot, save_page_content_to_file
 from utils.notify import notify
+from utils.mask_utils import mask_username
 
 # 默认缓存目录，与 checkin.py 保持一致
 DEFAULT_STORAGE_STATE_DIR = "storage-states"
@@ -43,6 +44,7 @@ class LinuxDoReadPosts:
         """
         self.username = username
         self.password = password
+        self.masked_username = mask_username(username)  # 用于日志输出的掩码用户名
         self.storage_state_dir = storage_state_dir
         # 使用用户名哈希生成缓存文件名，与 checkin.py 保持一致
         self.username_hash = hashlib.sha256(username.encode("utf-8")).hexdigest()[:8]
@@ -65,22 +67,22 @@ class LinuxDoReadPosts:
             是否已登录
         """
         try:
-            print(f"ℹ️ {self.username}: Checking login status...")
+            print(f"ℹ️ {self.masked_username}: Checking login status...")
             await page.goto("https://linux.do/", wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)  # 等待可能的重定向
 
             current_url = page.url
-            print(f"ℹ️ {self.username}: Current URL: {current_url}")
+            print(f"ℹ️ {self.masked_username}: Current URL: {current_url}")
 
             # 如果跳转到登录页面，说明未登录
             if current_url.startswith("https://linux.do/login"):
-                print(f"ℹ️ {self.username}: Redirected to login page, not logged in")
+                print(f"ℹ️ {self.masked_username}: Redirected to login page, not logged in")
                 return False
 
-            print(f"✅ {self.username}: Already logged in")
+            print(f"✅ {self.masked_username}: Already logged in")
             return True
         except Exception as e:
-            print(f"⚠️ {self.username}: Error checking login status: {e}")
+            print(f"⚠️ {self.masked_username}: Error checking login status: {e}")
             return False
 
     async def _do_login(self, page) -> bool:
@@ -93,7 +95,7 @@ class LinuxDoReadPosts:
             登录是否成功
         """
         try:
-            print(f"ℹ️ {self.username}: Starting login process...")
+            print(f"ℹ️ {self.masked_username}: Starting login process...")
 
             # 如果当前不在登录页面，先导航到登录页面
             if not page.url.startswith("https://linux.do/login"):
@@ -117,32 +119,32 @@ class LinuxDoReadPosts:
 
             # 检查是否遇到 Cloudflare 验证
             current_url = page.url
-            print(f"ℹ️ {self.username}: URL after login: {current_url}")
+            print(f"ℹ️ {self.masked_username}: URL after login: {current_url}")
 
             if "linux.do/challenge" in current_url:
                 print(
-                    f"⚠️ {self.username}: Cloudflare challenge detected, "
+                    f"⚠️ {self.masked_username}: Cloudflare challenge detected, "
                     "Camoufox should bypass it automatically. Waiting..."
                 )
                 # 等待 Cloudflare 验证完成，最多等待60秒
                 try:
                     await page.wait_for_url("https://linux.do/", timeout=60000)
-                    print(f"✅ {self.username}: Cloudflare challenge bypassed")
+                    print(f"✅ {self.masked_username}: Cloudflare challenge bypassed")
                 except Exception:
-                    print(f"⚠️ {self.username}: Cloudflare challenge timeout")
+                    print(f"⚠️ {self.masked_username}: Cloudflare challenge timeout")
 
             # 再次检查是否登录成功
             current_url = page.url
             if current_url.startswith("https://linux.do/login"):
-                print(f"❌ {self.username}: Login failed, still on login page")
+                print(f"❌ {self.masked_username}: Login failed, still on login page")
                 await take_screenshot(page, "login_failed", self.username)
                 return False
 
-            print(f"✅ {self.username}: Login successful")
+            print(f"✅ {self.masked_username}: Login successful")
             return True
 
         except Exception as e:
-            print(f"❌ {self.username}: Error during login: {e}")
+            print(f"❌ {self.masked_username}: Error during login: {e}")
             await take_screenshot(page, "login_error", self.username)
             return False
 
@@ -159,9 +161,9 @@ class LinuxDoReadPosts:
                     if content:
                         return int(content)
                     else:
-                        print(f"⚠️ {self.username}: Failed to load topic ID from cache, content is empty")
+                        print(f"⚠️ {self.masked_username}: Failed to load topic ID from cache, content is empty")
         except (ValueError, IOError) as e:
-            print(f"⚠️ {self.username}: Failed to load topic ID from cache: {e}")
+            print(f"⚠️ {self.masked_username}: Failed to load topic ID from cache: {e}")
         return 0
 
     def _save_topic_id(self, topic_id: int) -> None:
@@ -173,9 +175,9 @@ class LinuxDoReadPosts:
         try:
             with open(self.topic_id_cache_file, "w", encoding="utf-8") as f:
                 f.write(str(topic_id))
-            print(f"ℹ️ {self.username}: Saved topic ID {topic_id} to cache")
+            print(f"ℹ️ {self.masked_username}: Saved topic ID {topic_id} to cache")
         except IOError as e:
-            print(f"⚠️ {self.username}: Failed to save topic ID: {e}")
+            print(f"⚠️ {self.masked_username}: Failed to save topic ID: {e}")
 
     async def _read_posts(self, page, base_topic_id: int, max_posts: int) -> tuple[int, int]:
         """浏览帖子
@@ -198,7 +200,7 @@ class LinuxDoReadPosts:
         # 取环境变量和缓存中的最大值
         current_topic_id = max(base_topic_id, cached_topic_id)
         print(
-            f"ℹ️ {self.username}: Starting from topic ID {current_topic_id} "
+            f"ℹ️ {self.masked_username}: Starting from topic ID {current_topic_id} "
             f"(base: {base_topic_id}, cached: {cached_topic_id})"
         )
 
@@ -210,7 +212,7 @@ class LinuxDoReadPosts:
             if invalid_count >= 5:
                 jump = random.randint(50, 100)
                 current_topic_id += jump
-                print(f"⚠️ {self.username}: Too many invalid topics, jumping ahead by {jump} to {current_topic_id}")
+                print(f"⚠️ {self.masked_username}: Too many invalid topics, jumping ahead by {jump} to {current_topic_id}")
                 invalid_count = 0
             else:
                 # 随机向上加 1-5
@@ -219,7 +221,7 @@ class LinuxDoReadPosts:
             topic_url = f"https://linux.do/t/topic/{current_topic_id}"
 
             try:
-                print(f"ℹ️ {self.username}: Opening topic {current_topic_id}...")
+                print(f"ℹ️ {self.masked_username}: Opening topic {current_topic_id}...")
                 await page.goto(topic_url, wait_until="domcontentloaded")
                 await page.wait_for_timeout(3000)
 
@@ -229,7 +231,7 @@ class LinuxDoReadPosts:
                 if timeline_element:
                     # 获取 innerText 解析当前页/总页数，格式为 "当前 / 总数"
                     inner_text = await timeline_element.inner_text()
-                    print(f"✅ {self.username}: Topic {current_topic_id} - " f"Progress: {inner_text.strip()}")
+                    print(f"✅ {self.masked_username}: Topic {current_topic_id} - " f"Progress: {inner_text.strip()}")
 
                     # 解析页数信息并滚动浏览
                     try:
@@ -243,7 +245,7 @@ class LinuxDoReadPosts:
 
                             if current_page < total_pages:
                                 print(
-                                    f"ℹ️ {self.username}: Scrolling to read "
+                                    f"ℹ️ {self.masked_username}: Scrolling to read "
                                     f"remaining {total_pages - current_page} pages..."
                                 )
                                 # 自动滚动浏览剩余内容
@@ -252,25 +254,25 @@ class LinuxDoReadPosts:
                                 read_count += total_pages - current_page
                                 remaining_read_count = max(0, max_posts - read_count)
                                 print(
-                                    f"ℹ️ {self.username}: {read_count} read, "
+                                    f"ℹ️ {self.masked_username}: {read_count} read, "
                                     f"{remaining_read_count} remaining..."
                                 )
                         else:
-                            print(f"⚠️ {self.username}: Timeline read error(content: {inner_text}), continue")
+                            print(f"⚠️ {self.masked_username}: Timeline read error(content: {inner_text}), continue")
                             invalid_count += 1
                             continue
                     except (ValueError, IndexError) as e:
-                        print(f"⚠️ {self.username}: Failed to parse progress: {e}")
+                        print(f"⚠️ {self.masked_username}: Failed to parse progress: {e}")
                         invalid_count += 1
 
                     # 模拟阅读后等待
                     await page.wait_for_timeout(random.randint(1000, 2000))
                 else:
-                    print(f"⚠️ {self.username}: Topic {current_topic_id} not found or invalid, skipping...")
+                    print(f"⚠️ {self.masked_username}: Topic {current_topic_id} not found or invalid, skipping...")
                     invalid_count += 1
 
             except Exception as e:
-                print(f"⚠️ {self.username}: Error reading topic {current_topic_id}: {e}")
+                print(f"⚠️ {self.masked_username}: Error reading topic {current_topic_id}: {e}")
                 invalid_count += 1
 
         # 保存当前 topic_id 到缓存
@@ -299,7 +301,7 @@ class LinuxDoReadPosts:
             # 检查 timeline-replies 内容判断是否到底
             timeline_element = await page.query_selector(".timeline-replies")
             if not timeline_element:
-                print(f"ℹ️ {self.username}: Timeline element not found, stopping")
+                print(f"ℹ️ {self.masked_username}: Timeline element not found, stopping")
                 break
 
             inner_html = await timeline_element.inner_text()
@@ -312,20 +314,20 @@ class LinuxDoReadPosts:
                     # 如果滚动后页数没变，说明已经到底了
                     if current_page == last_current_page and total_pages == last_total_pages:
                         print(
-                            f"ℹ️ {self.username}: Page not changing " f"({current_page}/{total_pages}), reached bottom"
+                            f"ℹ️ {self.masked_username}: Page not changing " f"({current_page}/{total_pages}), reached bottom"
                         )
                         break
 
                     # 如果当前页等于总页数，说明到底了
                     if current_page >= total_pages:
-                        print(f"ℹ️ {self.username}: Reached end " f"({current_page}/{total_pages}) after scrolling")
+                        print(f"ℹ️ {self.masked_username}: Reached end " f"({current_page}/{total_pages}) after scrolling")
                         break
 
                     # 缓存当前页数
                     last_current_page = current_page
                     last_total_pages = total_pages
                 else:
-                    print(f"ℹ️ {self.username}: Timeline read error(content: {inner_html}), stopping")
+                    print(f"ℹ️ {self.masked_username}: Timeline read error(content: {inner_html}), stopping")
                     break
             except (ValueError, IndexError):
                 pass
@@ -339,7 +341,7 @@ class LinuxDoReadPosts:
         Returns:
             (成功标志, 结果信息字典)
         """
-        print(f"ℹ️ {self.username}: Starting Linux.do read posts task")
+        print(f"ℹ️ {self.masked_username}: Starting Linux.do read posts task")
 
         # 缓存文件路径，与 checkin.py 保持一致
         cache_file_path = f"{self.storage_state_dir}/linuxdo_{self.username_hash}_storage_state.json"
@@ -356,9 +358,9 @@ class LinuxDoReadPosts:
             # 加载缓存的 storage state（如果存在）
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
             if storage_state:
-                print(f"ℹ️ {self.username}: Restoring storage state from cache")
+                print(f"ℹ️ {self.masked_username}: Restoring storage state from cache")
             else:
-                print(f"ℹ️ {self.username}: No cache file found, starting fresh")
+                print(f"ℹ️ {self.masked_username}: No cache file found, starting fresh")
 
             context = await browser.new_context(storage_state=storage_state)
             page = await context.new_page()
@@ -375,20 +377,20 @@ class LinuxDoReadPosts:
 
                     # 保存会话状态
                     await context.storage_state(path=cache_file_path)
-                    print(f"✅ {self.username}: Storage state saved to cache file")
+                    print(f"✅ {self.masked_username}: Storage state saved to cache file")
 
                 # 浏览帖子
-                print(f"ℹ️ {self.username}: Starting to read posts...")
+                print(f"ℹ️ {self.masked_username}: Starting to read posts...")
                 last_topic_id, read_count = await self._read_posts(page, base_topic_id, max_posts)
 
-                print(f"✅ {self.username}: Successfully read {read_count} posts")
+                print(f"✅ {self.masked_username}: Successfully read {read_count} posts")
                 return True, {
                     "read_count": read_count,
                     "last_topic_id": last_topic_id,
                 }
 
             except Exception as e:
-                print(f"❌ {self.username}: Error occurred: {e}")
+                print(f"❌ {self.masked_username}: Error occurred: {e}")
                 await take_screenshot(page, "error", self.username)
                 return False, {"error": str(e)}
             finally:
@@ -424,6 +426,7 @@ def load_linuxdo_accounts() -> list[dict]:
                 continue
 
             username = account.get("username")
+            masked_username = mask_username(username)
             password = account.get("password")
 
             if not username or not password:
@@ -432,7 +435,7 @@ def load_linuxdo_accounts() -> list[dict]:
 
             # 根据 username 去重
             if username in seen_usernames:
-                print(f"ℹ️ Skipping duplicate account: {username}")
+                print(f"ℹ️ Skipping duplicate account: {masked_username}")
                 continue
 
             seen_usernames.add(username)
@@ -474,14 +477,18 @@ async def main():
 
     # 为每个账号执行任务
     for account in accounts:
+        username = account["username"]
+        masked_username = mask_username(username)
+        password = account["password"]
+
         print(f"\n{'='*50}")
-        print(f"📌 Processing: {account['username']}")
+        print(f"📌 Processing: {masked_username}")
         print(f"{'='*50}")
 
         try:
             reader = LinuxDoReadPosts(
-                username=account["username"],
-                password=account["password"],
+                username=username,
+                password=password,
             )
 
             start_time = datetime.now()
@@ -500,17 +507,17 @@ async def main():
             # 记录结果
             results.append(
                 {
-                    "username": account["username"],
+                    "username": username,
                     "success": success,
                     "result": result,
                     "duration": duration_str,
                 }
             )
         except Exception as e:
-            print(f"❌ {account['username']}: Exception occurred: {e}")
+            print(f"❌ {masked_username}: Exception occurred: {e}")
             results.append(
                 {
-                    "username": account["username"],
+                    "username": username,
                     "success": False,
                     "result": {"error": str(e)},
                     "duration": "00:00:00",
@@ -527,6 +534,7 @@ async def main():
         total_read_count = 0
         for r in results:
             username = r["username"]
+            masked_username = mask_username(username)
             duration = r["duration"]
             if r["success"]:
                 read_count = r["result"].get("read_count", 0)
@@ -534,11 +542,11 @@ async def main():
                 last_topic_id = r["result"].get("last_topic_id", "unknown")
                 topic_url = f"https://linux.do/t/topic/{last_topic_id}"
                 notification_lines.append(
-                    f"✅ {username}: Read {read_count} posts ({duration})\n" f"   Last topic: {topic_url}"
+                    f"✅ {masked_username}: Read {read_count} posts ({duration})\n" f"   Last topic: {topic_url}"
                 )
             else:
                 error = r["result"].get("error", "Unknown error")
-                notification_lines.append(f"❌ {username}: {error} ({duration})")
+                notification_lines.append(f"❌ {masked_username}: {error} ({duration})")
 
         # 添加阅读总数
         notification_lines.append("")

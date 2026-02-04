@@ -3,6 +3,11 @@ on:
   schedule:
     - cron: '0 */8 * * *'
   workflow_dispatch:
+    inputs:
+      debug:
+        description: '调试模式 (启用后会保存截图和 HTML 日志)'
+        required: false
+        type: boolean
 
 jobs:
   checkin:
@@ -60,6 +65,7 @@ jobs:
       env:
         ACCOUNTS_996: ${{ secrets.ACCOUNTS_996 }}
         PROXY: ${{secrets.PROXY_996}}
+        DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}

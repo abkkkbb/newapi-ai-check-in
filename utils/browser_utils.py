@@ -118,7 +118,17 @@ async def take_screenshot(
         reason: 截图原因描述
         account_name: 账号名称（用于日志输出和文件名）
         screenshots_dir: 截图保存目录，默认为 "screenshots"
+
+    Note:
+        通过环境变量 DEBUG=true 启用截图功能，默认为 false
     """
+    # 检查 DEBUG 环境变量
+    debug_enabled = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+
+    if not debug_enabled:
+        print(f"🔍 {account_name}: Screenshot skipped (DEBUG=false), reason: {reason}")
+        return
+
     try:
         os.makedirs(screenshots_dir, exist_ok=True)
 
@@ -152,7 +162,17 @@ async def save_page_content_to_file(
         account_name: 账号名称（用于日志输出和文件名）
         prefix: 文件名前缀（如 "github_", "linuxdo_" 等）
         logs_dir: 日志保存目录，默认为 "logs"
+
+    Note:
+        通过环境变量 DEBUG=true 启用保存 HTML 功能，默认为 false
     """
+    # 检查 DEBUG 环境变量
+    debug_enabled = os.getenv("DEBUG", "false").lower() in ("true", "1", "yes")
+
+    if not debug_enabled:
+        print(f"🔍 {account_name}: Save HTML skipped (DEBUG=false), reason: {reason}")
+        return
+
     try:
         os.makedirs(logs_dir, exist_ok=True)
 
@@ -161,7 +181,7 @@ async def save_page_content_to_file(
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_reason = "".join(c if c.isalnum() else "_" for c in reason)
-        
+
         # 构建文件名
         if prefix:
             filename = f"{safe_account_name}_{timestamp}_{prefix}_{safe_reason}.html"

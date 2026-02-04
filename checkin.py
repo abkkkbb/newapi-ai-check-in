@@ -19,6 +19,7 @@ from utils.get_cf_clearance import get_cf_clearance
 from utils.http_utils import proxy_resolve, response_resolve
 from utils.topup import topup
 from utils.get_headers import get_curl_cffi_impersonate
+from utils.mask_utils import mask_username
 
 class CheckIn:
     """newapi.ai 签到管理类"""
@@ -1479,7 +1480,7 @@ class CheckIn:
         if github_accounts:
             for idx, github_account in enumerate(github_accounts):
                 account_label = f"github[{idx}]" if len(github_accounts) > 1 else "github"
-                print(f"\nℹ️ {self.account_name}: Trying GitHub authentication ({github_account.username})")
+                print(f"\nℹ️ {self.account_name}: Trying GitHub authentication ({mask_username(github_account.username)})")
                 try:
                     username = github_account.username
                     password = github_account.password
@@ -1492,20 +1493,20 @@ class CheckIn:
                             username, password, bypass_cookies, common_headers
                         )
                         if success:
-                            print(f"✅ {self.account_name}: GitHub authentication successful ({github_account.username})")
+                            print(f"✅ {self.account_name}: GitHub authentication successful ({mask_username(github_account.username)})")
                             results.append((account_label, True, user_info))
                         else:
-                            print(f"❌ {self.account_name}: GitHub authentication failed ({github_account.username})")
+                            print(f"❌ {self.account_name}: GitHub authentication failed ({mask_username(github_account.username)})")
                             results.append((account_label, False, user_info))
                 except Exception as e:
-                    print(f"❌ {self.account_name}: GitHub authentication error ({github_account.username}): {e}")
+                    print(f"❌ {self.account_name}: GitHub authentication error ({mask_username(github_account.username)}): {e}")
                     results.append((account_label, False, {"error": str(e)}))
 
         # 尝试 Linux.do 认证（支持多个账号）
         if linuxdo_accounts:
             for idx, linuxdo_account in enumerate(linuxdo_accounts):
                 account_label = f"linux.do[{idx}]" if len(linuxdo_accounts) > 1 else "linux.do"
-                print(f"\nℹ️ {self.account_name}: Trying Linux.do authentication ({linuxdo_account.username})")
+                print(f"\nℹ️ {self.account_name}: Trying Linux.do authentication ({mask_username(linuxdo_account.username)})")
                 try:
                     username = linuxdo_account.username
                     password = linuxdo_account.password
@@ -1521,13 +1522,13 @@ class CheckIn:
                             common_headers,
                         )
                         if success:
-                            print(f"✅ {self.account_name}: Linux.do authentication successful ({linuxdo_account.username})")
+                            print(f"✅ {self.account_name}: Linux.do authentication successful ({mask_username(linuxdo_account.username)})")
                             results.append((account_label, True, user_info))
                         else:
-                            print(f"❌ {self.account_name}: Linux.do authentication failed ({linuxdo_account.username})")
+                            print(f"❌ {self.account_name}: Linux.do authentication failed ({mask_username(linuxdo_account.username)})")
                             results.append((account_label, False, user_info))
                 except Exception as e:
-                    print(f"❌ {self.account_name}: Linux.do authentication error ({linuxdo_account.username}): {e}")
+                    print(f"❌ {self.account_name}: Linux.do authentication error ({mask_username(linuxdo_account.username)}): {e}")
                     results.append((account_label, False, {"error": str(e)}))
 
         if not results:

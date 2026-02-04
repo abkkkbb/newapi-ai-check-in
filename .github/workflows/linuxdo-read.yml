@@ -7,6 +7,11 @@ on:
     # UTC 12:00 = 北京 20:00
     - cron: '0 1,6,12 * * *'  # 北京 09,14,20
   workflow_dispatch:
+    inputs:
+      debug:
+        description: '调试模式 (启用后会保存截图和 HTML 日志)'
+        required: false
+        type: boolean
 
 jobs:
   read-posts:
@@ -96,6 +101,7 @@ jobs:
       env:
         ACCOUNTS: ${{ secrets.ACCOUNTS_LINUX_DO }}
         LINUXDO_BASE_TOPIC_ID: ${{ secrets.LINUXDO_BASE_TOPIC_ID }}
+        DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
