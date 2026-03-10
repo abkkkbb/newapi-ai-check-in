@@ -19,8 +19,13 @@ from utils.mask_utils import mask_username
 # 默认缓存目录，与 checkin.py 保持一致
 DEFAULT_STORAGE_STATE_DIR = "storage-states"
 
-# 帖子起始 ID，从环境变量获取，默认 随机从100000-1100000选一个
-DEFAULT_BASE_TOPIC_ID = random.randint(1000000, 1100000)
+# 帖子起始 ID，从环境变量获取，默认 随机从100000-100200选一个
+# 通过 LINUXDO_BASE_TOPIC_ID 环境变量设置自定义值
+DEFAULT_BASE_TOPIC_ID = random.randint(100000, 100200)
+
+# 默认最大浏览帖子数
+# 通过 LINUXDO_MAX_POSTS 环境变量设置自定义值
+DEFAULT_MAX_POSTS = 100
 
 # 帖子 ID 缓存目录
 TOPIC_ID_CACHE_DIR = "linuxdo_reads"
@@ -205,18 +210,27 @@ class LinuxDoReadPosts:
         )
 
         read_count = 0
-        invalid_count = 0  # 连续无效帖子计数
+        consecutive_invalid_count = 0  # 连续无效帖子计数，用于终止任务
+        jump_invalid_count = 0  # 连续无效帖子计数，用于决定是否跳跃
 
         while read_count < max_posts:
-            # 如果连续无效超过5次，跳过50-100个ID
-            if invalid_count >= 5:
-                jump = random.randint(50, 100)
+            await page.wait_for_timeout(random.randint(1000, 3000))
+
+            if consecutive_invalid_count > 200:
+                print(
+                    f"⚠️ {self.masked_username}: Consecutive invalid topics exceeded 200, stopping at {current_topic_id}"
+                )
+                break
+
+            # 如果连续无效超过5次，跳过5-10个ID
+            if jump_invalid_count >= 5:
+                jump = random.randint(5, 10)
                 current_topic_id += jump
                 print(f"⚠️ {self.masked_username}: Too many invalid topics, jumping ahead by {jump} to {current_topic_id}")
-                invalid_count = 0
+                jump_invalid_count = 0
             else:
-                # 随机向上加 1-5
-                current_topic_id += random.randint(1, 5)
+                # 随机向上加 1-3
+                current_topic_id += random.randint(1, 3)
 
             topic_url = f"https://linux.do/t/topic/{current_topic_id}"
 
@@ -241,7 +255,8 @@ class LinuxDoReadPosts:
                             total_pages = int(parts[1].strip())
 
                             # 有效帖子，重置无效计数
-                            invalid_count = 0
+                            consecutive_invalid_count = 0
+                            jump_invalid_count = 0
 
                             if current_page < total_pages:
                                 print(
@@ -259,21 +274,27 @@ class LinuxDoReadPosts:
                                 )
                         else:
                             print(f"⚠️ {self.masked_username}: Timeline read error(content: {inner_text}), continue")
-                            invalid_count += 1
+                            consecutive_invalid_count += 1
+                            jump_invalid_count += 1
                             continue
                     except (ValueError, IndexError) as e:
                         print(f"⚠️ {self.masked_username}: Failed to parse progress: {e}")
-                        invalid_count += 1
+                        consecutive_invalid_count += 1
+                        jump_invalid_count += 1
 
                     # 模拟阅读后等待
                     await page.wait_for_timeout(random.randint(1000, 2000))
                 else:
                     print(f"⚠️ {self.masked_username}: Topic {current_topic_id} not found or invalid, skipping...")
-                    invalid_count += 1
+                    await take_screenshot(page, f"topic_not_found_or_invalid_{current_topic_id}", self.username)
+                    consecutive_invalid_count += 1
+                    jump_invalid_count += 1
 
             except Exception as e:
                 print(f"⚠️ {self.masked_username}: Error reading topic {current_topic_id}: {e}")
-                invalid_count += 1
+                await take_screenshot(page, f"topic_read_error_{current_topic_id}", self.username)
+                consecutive_invalid_count += 1
+                jump_invalid_count += 1
 
         # 保存当前 topic_id 到缓存
         self._save_topic_id(current_topic_id)
@@ -332,11 +353,8 @@ class LinuxDoReadPosts:
             except (ValueError, IndexError):
                 pass
 
-    async def run(self, max_posts: int = 100) -> tuple[bool, dict]:
+    async def run(self) -> tuple[bool, dict]:
         """执行浏览帖子任务
-
-        Args:
-            max_posts: 最大浏览帖子数，默认 100
 
         Returns:
             (成功标志, 结果信息字典)
@@ -348,7 +366,33 @@ class LinuxDoReadPosts:
 
         # 从环境变量获取起始 ID
         base_topic_id_str = os.getenv("LINUXDO_BASE_TOPIC_ID", "")
-        base_topic_id = int(base_topic_id_str) if base_topic_id_str else DEFAULT_BASE_TOPIC_ID
+        try:
+            base_topic_id = int(base_topic_id_str) if base_topic_id_str else DEFAULT_BASE_TOPIC_ID
+        except ValueError:
+            print(
+                f"⚠️ {self.masked_username}: Invalid LINUXDO_BASE_TOPIC_ID={base_topic_id_str}, "
+                f"fallback to default {DEFAULT_BASE_TOPIC_ID}"
+            )
+            base_topic_id = DEFAULT_BASE_TOPIC_ID
+
+        # 从环境变量获取最大浏览帖子数，并在上下 50 范围内随机
+        max_posts_str = os.getenv("LINUXDO_MAX_POSTS", "")
+        try:
+            base_max_posts = int(max_posts_str) if max_posts_str else DEFAULT_MAX_POSTS
+        except ValueError:
+            print(
+                f"⚠️ {self.masked_username}: Invalid LINUXDO_MAX_POSTS={max_posts_str}, "
+                f"fallback to default {DEFAULT_MAX_POSTS}"
+            )
+            base_max_posts = DEFAULT_MAX_POSTS
+
+        min_posts = max(10, base_max_posts - 50)
+        max_posts_upper = max(min_posts, base_max_posts + 50)
+        max_posts = random.randint(min_posts, max_posts_upper)
+        print(
+            f"ℹ️ {self.masked_username}: Max posts range {min_posts}-{max_posts_upper}, "
+            f"selected {max_posts}"
+        )
 
         async with AsyncCamoufox(
             headless=False,
@@ -492,7 +536,7 @@ async def main():
             )
 
             start_time = datetime.now()
-            success, result = await reader.run(random.randint(200, 300))
+            success, result = await reader.run()
             end_time = datetime.now()
             duration = end_time - start_time
 
