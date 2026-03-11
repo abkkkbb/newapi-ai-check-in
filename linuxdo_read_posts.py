@@ -236,25 +236,44 @@ class LinuxDoReadPosts:
 
             try:
                 print(f"ℹ️ {self.masked_username}: Opening topic {current_topic_id}...")
-                await page.goto(topic_url, wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)
+                response = await page.goto(topic_url, wait_until="domcontentloaded")
 
-                # 查找 timeline-replies 标签
+                # 等待前端异步内容渲染完成
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    pass
+
+                # HTTP 404/410 明确表示帖子不存在
+                if response and response.status in (404, 410):
+                    print(f"⚠️ {self.masked_username}: Topic {current_topic_id} HTTP {response.status}, skipping...")
+                    consecutive_invalid_count += 1
+                    jump_invalid_count += 1
+                    continue
+
+                # 等待帖子主体 DOM 出现（比 .timeline-replies 更可靠）
+                try:
+                    await page.wait_for_selector("#topic-title, .topic-post, .topic-body", timeout=15000)
+                except Exception:
+                    print(f"⚠️ {self.masked_username}: Topic {current_topic_id} page not loaded in time, skipping...")
+                    await take_screenshot(page, f"topic_not_loaded_{current_topic_id}", self.username)
+                    consecutive_invalid_count += 1
+                    jump_invalid_count += 1
+                    continue
+
+                # 先尝试通过 timeline-replies 获取页数信息（长帖才有）
                 timeline_element = await page.query_selector(".timeline-replies")
 
                 if timeline_element:
-                    # 获取 innerText 解析当前页/总页数，格式为 "当前 / 总数"
                     inner_text = await timeline_element.inner_text()
                     print(f"✅ {self.masked_username}: Topic {current_topic_id} - " f"Progress: {inner_text.strip()}")
 
-                    # 解析页数信息并滚动浏览
                     try:
                         parts = inner_text.strip().split("/")
                         if len(parts) == 2 and parts[0].strip().isdigit() and parts[1].strip().isdigit():
                             current_page = int(parts[0].strip())
                             total_pages = int(parts[1].strip())
 
-                            # 有效帖子，重置无效计数
                             consecutive_invalid_count = 0
                             jump_invalid_count = 0
 
@@ -263,32 +282,36 @@ class LinuxDoReadPosts:
                                     f"ℹ️ {self.masked_username}: Scrolling to read "
                                     f"remaining {total_pages - current_page} pages..."
                                 )
-                                # 自动滚动浏览剩余内容
                                 await self._scroll_to_read(page)
 
-                                read_count += total_pages - current_page
+                                increment = min(total_pages - current_page, max_posts - read_count)
+                                read_count += increment
                                 remaining_read_count = max(0, max_posts - read_count)
                                 print(
                                     f"ℹ️ {self.masked_username}: {read_count} read, "
                                     f"{remaining_read_count} remaining..."
                                 )
-                        else:
-                            print(f"⚠️ {self.masked_username}: Timeline read error(content: {inner_text}), continue")
-                            consecutive_invalid_count += 1
-                            jump_invalid_count += 1
-                            continue
                     except (ValueError, IndexError) as e:
                         print(f"⚠️ {self.masked_username}: Failed to parse progress: {e}")
-                        consecutive_invalid_count += 1
-                        jump_invalid_count += 1
 
-                    # 模拟阅读后等待
                     await page.wait_for_timeout(random.randint(1000, 2000))
                 else:
-                    print(f"⚠️ {self.masked_username}: Topic {current_topic_id} not found or invalid, skipping...")
-                    await take_screenshot(page, f"topic_not_found_or_invalid_{current_topic_id}", self.username)
-                    consecutive_invalid_count += 1
-                    jump_invalid_count += 1
+                    # 没有时间轴的短帖，用 .topic-post 判断是否有效
+                    posts = await page.query_selector_all(".topic-post")
+                    if posts:
+                        read_count += 1
+                        consecutive_invalid_count = 0
+                        jump_invalid_count = 0
+                        print(
+                            f"✅ {self.masked_username}: Topic {current_topic_id} is a short post "
+                            f"({len(posts)} replies), counted as 1 read"
+                        )
+                        await page.wait_for_timeout(random.randint(1000, 2000))
+                    else:
+                        print(f"⚠️ {self.masked_username}: Topic {current_topic_id} not found or invalid, skipping...")
+                        await take_screenshot(page, f"topic_not_found_or_invalid_{current_topic_id}", self.username)
+                        consecutive_invalid_count += 1
+                        jump_invalid_count += 1
 
             except Exception as e:
                 print(f"⚠️ {self.masked_username}: Error reading topic {current_topic_id}: {e}")
@@ -394,8 +417,17 @@ class LinuxDoReadPosts:
             f"selected {max_posts}"
         )
 
+        # GitHub Actions 环境自动启用 headless 模式，也可通过环境变量覆盖
+        headless_env = os.getenv("LINUXDO_HEADLESS", "").strip().lower()
+        if headless_env in ("1", "true", "yes"):
+            use_headless = True
+        elif headless_env in ("0", "false", "no"):
+            use_headless = False
+        else:
+            use_headless = bool(os.getenv("GITHUB_ACTIONS"))
+
         async with AsyncCamoufox(
-            headless=False,
+            headless=use_headless,
             humanize=True,
             locale="en-US",
         ) as browser:
