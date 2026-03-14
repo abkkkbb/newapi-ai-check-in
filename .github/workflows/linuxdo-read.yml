@@ -98,10 +98,13 @@ jobs:
           linuxdo-reads-
 
     - name: 启动 Xray 代理
-      if: ${{ secrets.VLESS_URL != '' }}
       env:
         VLESS_URL: ${{ secrets.VLESS_URL }}
       run: |
+        if (-not $env:VLESS_URL) {
+          echo "ℹ️ VLESS_URL 未配置，跳过 Xray 代理"
+          exit 0
+        }
         $ErrorActionPreference = "Stop"
 
         # 下载 Xray
