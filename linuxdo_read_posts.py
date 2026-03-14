@@ -20,9 +20,9 @@ from utils.mask_utils import mask_username
 # 默认缓存目录，与 checkin.py 保持一致
 DEFAULT_STORAGE_STATE_DIR = "storage-states"
 
-# 帖子起始 ID，从环境变量获取，默认 随机从100000-100200选一个
+# 帖子起始 ID，从环境变量获取，默认 随机从120000-120200选一个
 # 通过 LINUXDO_BASE_TOPIC_ID 环境变量设置自定义值
-DEFAULT_BASE_TOPIC_ID = random.randint(100000, 100200)
+DEFAULT_BASE_TOPIC_ID = random.randint(120000, 120200)
 
 # 默认最大浏览帖子数
 # 通过 LINUXDO_MAX_POSTS 环境变量设置自定义值
