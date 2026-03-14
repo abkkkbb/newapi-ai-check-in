@@ -330,9 +330,10 @@ class LinuxDoReadPosts:
         consecutive_invalid_count = 0  # 连续无效帖子计数，用于终止任务
         jump_invalid_count = 0  # 连续无效帖子计数，用于决定是否跳跃
         cf_block_count = 0  # 连续 Cloudflare 阻断计数
+        rate_limit_delay = 10  # 429 退避延迟（秒），逐次递增
 
         while read_count < max_posts:
-            await page.wait_for_timeout(random.randint(1000, 3000))
+            await page.wait_for_timeout(random.randint(3000, 8000))
 
             if consecutive_invalid_count > 50:
                 print(
@@ -385,6 +386,21 @@ class LinuxDoReadPosts:
                         )
                         continue
 
+                # HTTP 429 速率限制：等待后重试同一帖子
+                if response and response.status == 429:
+                    print(
+                        f"⚠️ {self.masked_username}: Rate limited (429), "
+                        f"waiting {rate_limit_delay}s before retry..."
+                    )
+                    await page.wait_for_timeout(rate_limit_delay * 1000)
+                    rate_limit_delay = min(rate_limit_delay + 10, 60)
+                    # 回退 topic_id 让下次循环重试同一帖子
+                    current_topic_id -= random.randint(1, 3)
+                    continue
+
+                # 请求成功，重置 429 退避延迟
+                rate_limit_delay = 10
+
                 # HTTP 404/410 明确表示帖子不存在
                 if response and response.status in (404, 410):
                     print(f"⚠️ {self.masked_username}: Topic {current_topic_id} HTTP {response.status}, skipping...")
@@ -400,6 +416,18 @@ class LinuxDoReadPosts:
                     diag_url = page.url
                     diag_title = await page.title()
                     diag_html = await page.evaluate("() => document.documentElement.outerHTML.substring(0, 500)")
+
+                    # 检测页面内容中的 429 Too Many Requests（Firefox 可能直接渲染为纯文本）
+                    if "Too Many Requests" in diag_html:
+                        print(
+                            f"⚠️ {self.masked_username}: Rate limited (429 in page body), "
+                            f"waiting {rate_limit_delay}s before retry..."
+                        )
+                        await page.wait_for_timeout(rate_limit_delay * 1000)
+                        rate_limit_delay = min(rate_limit_delay + 10, 60)
+                        current_topic_id -= random.randint(1, 3)
+                        continue
+
                     print(
                         f"⚠️ {self.masked_username}: Topic {current_topic_id} page not loaded in time, skipping...\n"
                         f"   URL: {diag_url}\n"
