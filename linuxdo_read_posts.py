@@ -12,6 +12,7 @@ import random
 from datetime import datetime
 from dotenv import load_dotenv
 from camoufox.async_api import AsyncCamoufox
+from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from utils.browser_utils import take_screenshot, save_page_content_to_file
 from utils.notify import notify
 from utils.mask_utils import mask_username
@@ -53,12 +54,102 @@ class LinuxDoReadPosts:
         self.storage_state_dir = storage_state_dir
         # 使用用户名哈希生成缓存文件名，与 checkin.py 保持一致
         self.username_hash = hashlib.sha256(username.encode("utf-8")).hexdigest()[:8]
+        self.solver = None  # ClickSolver 实例，在 run() 中初始化
 
         os.makedirs(self.storage_state_dir, exist_ok=True)
         os.makedirs(TOPIC_ID_CACHE_DIR, exist_ok=True)
 
         # 每个用户独立的 topic_id 缓存文件
         self.topic_id_cache_file = os.path.join(TOPIC_ID_CACHE_DIR, f"{self.username_hash}_topic_id.txt")
+
+    async def _is_cf_challenge(self, page) -> bool:
+        """检测当前页面是否为 Cloudflare challenge 页面（轻量检测）
+
+        优先使用 page.title() 判断，再用 locator 兜底，避免 page.content() 开销。
+
+        Args:
+            page: Camoufox 页面对象
+
+        Returns:
+            是否为 CF challenge 页面
+        """
+        try:
+            page_title = await page.title()
+            if "Just a moment" in page_title:
+                print(
+                    f"⚠️ {self.masked_username}: Cloudflare challenge detected "
+                    f"(title='{page_title}', url={page.url})"
+                )
+                return True
+
+            challenge_form_count = await page.locator("form#challenge-form").count()
+            if challenge_form_count > 0:
+                print(
+                    f"⚠️ {self.masked_username}: Cloudflare challenge detected "
+                    f"(challenge-form found, url={page.url})"
+                )
+                return True
+
+            checking_text_count = await page.locator("text=Checking your browser").count()
+            if checking_text_count > 0:
+                print(
+                    f"⚠️ {self.masked_username}: Cloudflare challenge detected "
+                    f"(checking-browser text found, url={page.url})"
+                )
+                return True
+
+            cf_div_count = await page.locator("div[id^='cf-']").count()
+            if cf_div_count > 0:
+                print(
+                    f"⚠️ {self.masked_username}: Cloudflare challenge detected "
+                    f"(cf-* div found, url={page.url})"
+                )
+                return True
+        except Exception as e:
+            print(f"⚠️ {self.masked_username}: CF detection check error: {e}")
+        return False
+
+    async def _solve_cf_challenge(self, page) -> bool:
+        """使用 ClickSolver 尝试解决 Cloudflare challenge
+
+        复用 self.solver（在 run() 中初始化），解题失败不影响主流程。
+
+        Args:
+            page: Camoufox 页面对象
+
+        Returns:
+            是否成功通过 CF challenge
+        """
+        if not self.solver:
+            print(f"⚠️ {self.masked_username}: ClickSolver not initialized, cannot solve CF")
+            return False
+
+        try:
+            print(f"ℹ️ {self.masked_username}: Attempting to auto-solve Cloudflare challenge...")
+            await self.solver.solve_captcha(
+                captcha_container=page, captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
+            )
+            await page.wait_for_timeout(8000)
+
+            # 等待页面完成跳转后再验证
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=10000)
+            except Exception:
+                pass
+
+            # 验证是否通过：URL 已离开 challenge 或页面不再是 CF 页面
+            current_url = page.url
+            if "__cf_chl" not in current_url and "/challenge" not in current_url:
+                still_cf = await self._is_cf_challenge(page)
+                if not still_cf:
+                    print(f"✅ {self.masked_username}: Cloudflare challenge auto-solved")
+                    return True
+
+            print(f"⚠️ {self.masked_username}: CF challenge still present after solve attempt")
+            return False
+        except Exception as e:
+            print(f"⚠️ {self.masked_username}: CF auto-solve failed: {e}")
+            return False
 
     async def _is_logged_in(self, page) -> bool:
         """检查是否已登录
@@ -75,6 +166,14 @@ class LinuxDoReadPosts:
             print(f"ℹ️ {self.masked_username}: Checking login status...")
             await page.goto("https://linux.do/", wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)  # 等待可能的重定向
+
+            # 检测 Cloudflare challenge，避免将 CF 页面误判为已登录
+            if await self._is_cf_challenge(page):
+                if not await self._solve_cf_challenge(page):
+                    print(f"⚠️ {self.masked_username}: CF challenge unsolved, cannot determine login status")
+                    return False
+                # CF 解决后等待页面完成跳转
+                await page.wait_for_timeout(3000)
 
             current_url = page.url
             print(f"ℹ️ {self.masked_username}: Current URL: {current_url}")
@@ -108,6 +207,12 @@ class LinuxDoReadPosts:
 
             await page.wait_for_timeout(2000)
 
+            # 登录页加载后检测 Cloudflare
+            if await self._is_cf_challenge(page):
+                if not await self._solve_cf_challenge(page):
+                    print(f"⚠️ {self.masked_username}: CF challenge on login page unsolved")
+                    return False
+
             # 填写用户名
             await page.fill("#login-account-name", self.username)
             await page.wait_for_timeout(2000)
@@ -122,21 +227,14 @@ class LinuxDoReadPosts:
 
             await save_page_content_to_file(page, "login_result", self.username)
 
-            # 检查是否遇到 Cloudflare 验证
+            # 登录提交后检测 Cloudflare（替代旧的被动等待机制）
             current_url = page.url
             print(f"ℹ️ {self.masked_username}: URL after login: {current_url}")
 
-            if "linux.do/challenge" in current_url:
-                print(
-                    f"⚠️ {self.masked_username}: Cloudflare challenge detected, "
-                    "Camoufox should bypass it automatically. Waiting..."
-                )
-                # 等待 Cloudflare 验证完成，最多等待60秒
-                try:
-                    await page.wait_for_url("https://linux.do/", timeout=60000)
-                    print(f"✅ {self.masked_username}: Cloudflare challenge bypassed")
-                except Exception:
-                    print(f"⚠️ {self.masked_username}: Cloudflare challenge timeout")
+            if await self._is_cf_challenge(page) or "linux.do/challenge" in current_url:
+                if not await self._solve_cf_challenge(page):
+                    print(f"⚠️ {self.masked_username}: CF challenge after login unsolved")
+                    return False
 
             # 再次检查是否登录成功
             current_url = page.url
@@ -212,13 +310,14 @@ class LinuxDoReadPosts:
         read_count = 0
         consecutive_invalid_count = 0  # 连续无效帖子计数，用于终止任务
         jump_invalid_count = 0  # 连续无效帖子计数，用于决定是否跳跃
+        cf_block_count = 0  # 连续 Cloudflare 阻断计数
 
         while read_count < max_posts:
             await page.wait_for_timeout(random.randint(1000, 3000))
 
-            if consecutive_invalid_count > 200:
+            if consecutive_invalid_count > 50:
                 print(
-                    f"⚠️ {self.masked_username}: Consecutive invalid topics exceeded 200, stopping at {current_topic_id}"
+                    f"⚠️ {self.masked_username}: Consecutive invalid topics exceeded 50, stopping at {current_topic_id}"
                 )
                 break
 
@@ -240,6 +339,32 @@ class LinuxDoReadPosts:
 
                 # Discourse 存在长轮询，networkidle 不可靠，用轻量延迟替代
                 await page.wait_for_timeout(1000)
+
+                # 检测 Cloudflare challenge（不计入无效帖子计数）
+                if await self._is_cf_challenge(page):
+                    solved = await self._solve_cf_challenge(page)
+                    if solved:
+                        cf_block_count = 0
+                        # CF 解决后仅在 URL 不匹配时才重新导航
+                        if f"/t/topic/{current_topic_id}" not in page.url:
+                            response = await page.goto(topic_url, wait_until="domcontentloaded")
+                            try:
+                                await page.wait_for_load_state("networkidle", timeout=8000)
+                            except Exception:
+                                pass
+                    else:
+                        cf_block_count += 1
+                        if cf_block_count >= 3:
+                            print(
+                                f"❌ {self.masked_username}: CF block count reached {cf_block_count}, "
+                                f"aborting at topic {current_topic_id}"
+                            )
+                            break
+                        print(
+                            f"⚠️ {self.masked_username}: CF solve failed ({cf_block_count}/3), "
+                            f"will retry on next topic"
+                        )
+                        continue
 
                 # HTTP 404/410 明确表示帖子不存在
                 if response and response.status in (404, 410):
@@ -426,6 +551,9 @@ class LinuxDoReadPosts:
             headless=use_headless,
             humanize=True,
             locale="en-US",
+            config={
+                "forceScopeAccess": True,
+            },
         ) as browser:
             # 加载缓存的 storage state（如果存在）
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
@@ -437,37 +565,42 @@ class LinuxDoReadPosts:
             context = await browser.new_context(storage_state=storage_state)
             page = await context.new_page()
 
-            try:
-                # 检查是否已登录
-                is_logged_in = await self._is_logged_in(page)
+            async with ClickSolver(
+                framework=FrameworkType.CAMOUFOX, page=page, max_attempts=5, attempt_delay=3
+            ) as solver:
+                self.solver = solver
+                try:
+                    # 检查是否已登录
+                    is_logged_in = await self._is_logged_in(page)
 
-                # 如果未登录，执行登录流程
-                if not is_logged_in:
-                    login_success = await self._do_login(page)
-                    if not login_success:
-                        return False, {"error": "Login failed"}
+                    # 如果未登录，执行登录流程
+                    if not is_logged_in:
+                        login_success = await self._do_login(page)
+                        if not login_success:
+                            return False, {"error": "Login failed"}
 
-                    # 保存会话状态
-                    await context.storage_state(path=cache_file_path)
-                    print(f"✅ {self.masked_username}: Storage state saved to cache file")
+                        # 保存会话状态
+                        await context.storage_state(path=cache_file_path)
+                        print(f"✅ {self.masked_username}: Storage state saved to cache file")
 
-                # 浏览帖子
-                print(f"ℹ️ {self.masked_username}: Starting to read posts...")
-                last_topic_id, read_count = await self._read_posts(page, base_topic_id, max_posts)
+                    # 浏览帖子
+                    print(f"ℹ️ {self.masked_username}: Starting to read posts...")
+                    last_topic_id, read_count = await self._read_posts(page, base_topic_id, max_posts)
 
-                print(f"✅ {self.masked_username}: Successfully read {read_count} posts")
-                return True, {
-                    "read_count": read_count,
-                    "last_topic_id": last_topic_id,
-                }
+                    print(f"✅ {self.masked_username}: Successfully read {read_count} posts")
+                    return True, {
+                        "read_count": read_count,
+                        "last_topic_id": last_topic_id,
+                    }
 
-            except Exception as e:
-                print(f"❌ {self.masked_username}: Error occurred: {e}")
-                await take_screenshot(page, "error", self.username)
-                return False, {"error": str(e)}
-            finally:
-                await page.close()
-                await context.close()
+                except Exception as e:
+                    print(f"❌ {self.masked_username}: Error occurred: {e}")
+                    await take_screenshot(page, "error", self.username)
+                    return False, {"error": str(e)}
+                finally:
+                    self.solver = None
+                    await page.close()
+                    await context.close()
 
 
 def load_linuxdo_accounts() -> list[dict]:
