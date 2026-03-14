@@ -238,11 +238,8 @@ class LinuxDoReadPosts:
                 print(f"ℹ️ {self.masked_username}: Opening topic {current_topic_id}...")
                 response = await page.goto(topic_url, wait_until="domcontentloaded")
 
-                # 等待前端异步内容渲染完成
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    pass
+                # Discourse 存在长轮询，networkidle 不可靠，用轻量延迟替代
+                await page.wait_for_timeout(1000)
 
                 # HTTP 404/410 明确表示帖子不存在
                 if response and response.status in (404, 410):
@@ -417,14 +414,13 @@ class LinuxDoReadPosts:
             f"selected {max_posts}"
         )
 
-        # GitHub Actions 环境自动启用 headless 模式，也可通过环境变量覆盖
+        # 默认 headless=False（Windows runner 有桌面，camoufox headless 与 Discourse 不兼容）
+        # 仅通过 LINUXDO_HEADLESS 环境变量手动覆盖
         headless_env = os.getenv("LINUXDO_HEADLESS", "").strip().lower()
         if headless_env in ("1", "true", "yes"):
             use_headless = True
-        elif headless_env in ("0", "false", "no"):
-            use_headless = False
         else:
-            use_headless = bool(os.getenv("GITHUB_ACTIONS"))
+            use_headless = False
 
         async with AsyncCamoufox(
             headless=use_headless,
