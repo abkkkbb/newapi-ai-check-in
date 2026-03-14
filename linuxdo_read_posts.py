@@ -251,6 +251,25 @@ class LinuxDoReadPosts:
             await take_screenshot(page, "login_error", self.username)
             return False
 
+    @staticmethod
+    def _load_proxy() -> dict | None:
+        """从 PROXY 环境变量加载代理配置
+
+        Returns:
+            代理配置字典，格式为 {"server": "...", "username": "...", "password": "..."}，
+            或 None（未配置代理）
+        """
+        proxy_str = os.getenv("PROXY", "").strip()
+        if not proxy_str:
+            return None
+        try:
+            proxy = json.loads(proxy_str)
+            if isinstance(proxy, dict) and "server" in proxy:
+                return proxy
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return {"server": proxy_str}
+
     def _load_topic_id(self) -> int:
         """从缓存文件读取上次的 topic_id
 
@@ -338,7 +357,7 @@ class LinuxDoReadPosts:
                 response = await page.goto(topic_url, wait_until="domcontentloaded")
 
                 # Discourse 存在长轮询，networkidle 不可靠，用轻量延迟替代
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(3000)
 
                 # 检测 Cloudflare challenge（不计入无效帖子计数）
                 if await self._is_cf_challenge(page):
@@ -377,7 +396,16 @@ class LinuxDoReadPosts:
                 try:
                     await page.wait_for_selector("#topic-title, .topic-post, .topic-body", timeout=15000)
                 except Exception:
-                    print(f"⚠️ {self.masked_username}: Topic {current_topic_id} page not loaded in time, skipping...")
+                    # 诊断：输出页面实际状态
+                    diag_url = page.url
+                    diag_title = await page.title()
+                    diag_html = await page.evaluate("() => document.documentElement.outerHTML.substring(0, 500)")
+                    print(
+                        f"⚠️ {self.masked_username}: Topic {current_topic_id} page not loaded in time, skipping...\n"
+                        f"   URL: {diag_url}\n"
+                        f"   Title: {diag_title}\n"
+                        f"   HTML preview: {diag_html[:200]}"
+                    )
                     await take_screenshot(page, f"topic_not_loaded_{current_topic_id}", self.username)
                     consecutive_invalid_count += 1
                     jump_invalid_count += 1
@@ -547,14 +575,24 @@ class LinuxDoReadPosts:
         else:
             use_headless = False
 
-        async with AsyncCamoufox(
-            headless=use_headless,
-            humanize=True,
-            locale="en-US",
-            config={
+        # 代理配置：从 PROXY 环境变量加载
+        proxy_config = self._load_proxy()
+        if proxy_config:
+            print(f"ℹ️ {self.masked_username}: Using proxy: {proxy_config.get('server', 'unknown')}")
+
+        camoufox_kwargs = {
+            "headless": use_headless,
+            "humanize": True,
+            "locale": "en-US",
+            "config": {
                 "forceScopeAccess": True,
             },
-        ) as browser:
+        }
+        if proxy_config:
+            camoufox_kwargs["proxy"] = proxy_config
+            camoufox_kwargs["geoip"] = True
+
+        async with AsyncCamoufox(**camoufox_kwargs) as browser:
             # 加载缓存的 storage state（如果存在）
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
             if storage_state:
