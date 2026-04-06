@@ -110,6 +110,8 @@ jobs:
         ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
         PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
         PROXY: ${{secrets.PROXY}}
+        STORATE_STATES_GITHUB: ${{ secrets.STORATE_STATES_GITHUB }}
+        STORATE_STATES_LINUXDO: ${{ secrets.STORATE_STATES_LINUXDO }}
         DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}

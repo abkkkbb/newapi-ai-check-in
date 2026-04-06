@@ -314,9 +314,7 @@ class AppConfig:
         accounts = cls._load_accounts(accounts_env, linux_do_accounts, github_accounts)
 
         # 自动为自定义 provider 添加账号（如果 accounts 中没有对应的 provider）
-        accounts = cls._auto_add_accounts_for_custom_providers(
-            providers, accounts, linux_do_accounts, github_accounts
-        )
+        accounts = cls._auto_add_accounts_for_custom_providers(providers, accounts, linux_do_accounts, github_accounts)
 
         # 加载全局代理配置
         global_proxy = cls._load_proxy(proxy_env)
@@ -623,44 +621,44 @@ class AppConfig:
                 aliyun_captcha=False,
                 bypass_method="cf_clearance",
             ),
-            "b4u": ProviderConfig(
-                name="b4u",
-                origin="https://b4u.qzz.io",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path=None,  # 无签到接口，通过 luckydraw 获取 CDK 并 topup
-                check_in_status=False,
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                get_cdk=get_b4u_cdk,  # 通过 tw.b4u.qzz.io/luckydraw 抽奖获取 CDK
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="Cf3PtT3ecj4kzJrMvOGM48FrHFKYXusb",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method="cf_clearance",
-            ),
-            "lightllm": ProviderConfig(
-                name="lightllm",
-                origin="https://lightllm.online",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=True,  # 使用标准签到状态查询
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                get_cdk=None,
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="i7YfDNeJPx8Rbjx8JpD10YgQ2TVElVA4",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method=None,
-            ),
+            # "b4u": ProviderConfig(
+            #     name="b4u",
+            #     origin="https://b4u.qzz.io",
+            #     login_path="/login",
+            #     status_path="/api/status",
+            #     auth_state_path="/api/oauth/state",
+            #     check_in_path=None,  # 无签到接口，通过 luckydraw 获取 CDK 并 topup
+            #     check_in_status=False,
+            #     user_info_path="/api/user/self",
+            #     topup_path="/api/user/topup",
+            #     get_cdk=get_b4u_cdk,  # 通过 tw.b4u.qzz.io/luckydraw 抽奖获取 CDK
+            #     api_user_key="new-api-user",
+            #     github_client_id=None,
+            #     github_auth_path="/api/oauth/github",
+            #     linuxdo_client_id="Cf3PtT3ecj4kzJrMvOGM48FrHFKYXusb",
+            #     linuxdo_auth_path="/api/oauth/linuxdo",
+            #     aliyun_captcha=False,
+            #     bypass_method="cf_clearance",
+            # ),
+            # "lightllm": ProviderConfig(
+            #     name="lightllm",
+            #     origin="https://lightllm.online",
+            #     login_path="/login",
+            #     status_path="/api/status",
+            #     auth_state_path="/api/oauth/state",
+            #     check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+            #     check_in_status=True,  # 使用标准签到状态查询
+            #     user_info_path="/api/user/self",
+            #     topup_path="/api/user/topup",
+            #     get_cdk=None,
+            #     api_user_key="new-api-user",
+            #     github_client_id=None,
+            #     github_auth_path="/api/oauth/github",
+            #     linuxdo_client_id="i7YfDNeJPx8Rbjx8JpD10YgQ2TVElVA4",
+            #     linuxdo_auth_path="/api/oauth/linuxdo",
+            #     aliyun_captcha=False,
+            #     bypass_method=None,
+            # ),
             "takeapi": ProviderConfig(
                 name="takeapi",
                 origin="https://codex.661118.xyz",
@@ -701,7 +699,7 @@ class AppConfig:
             ),
             "duckcoding": ProviderConfig(
                 name="duckcoding",
-                origin="https://duckcoding.com",
+                origin="https://duckcoding.ai",
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
@@ -720,7 +718,7 @@ class AppConfig:
             ),
             "free-duckcoding": ProviderConfig(
                 name="free-duckcoding",
-                origin="https://free.duckcoding.com",
+                origin="https://free.duckcoding.ai",
                 login_path="/login",
                 status_path="/api/status",
                 auth_state_path="/api/oauth/state",
@@ -733,25 +731,6 @@ class AppConfig:
                 github_client_id=None,
                 github_auth_path="/api/oauth/github",
                 linuxdo_client_id="XNJfOdoSeXkcx80mDydoheJ0nZS4tjIf",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method=None,
-            ),
-            "taizi": ProviderConfig(
-                name="taizi",
-                origin="https://api.codeme.me/",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=True,  # 使用标准签到状态查询
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                get_cdk=None,
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="ed4CnVPkYpQZSLFdha2pHFtHJOmHQ4bU",
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method=None,
@@ -771,25 +750,6 @@ class AppConfig:
                 github_client_id=None,
                 github_auth_path="/api/oauth/github",
                 linuxdo_client_id="65Lj7gYXHoSAVDDUq6Plb11thoqAV1t7",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method=None,
-            ),
-            "chengtx": ProviderConfig(
-                name="chengtx",
-                origin="https://api.chengtx.vip",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=True,  # 使用标准签到状态查询
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                get_cdk=None,
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="pVtvkPeJx1z4OjEmBSHj3rnMvw1lF4Vb",
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method=None,

@@ -1,4 +1,3 @@
-.claude
 .env
 .venv
 __pycache__
@@ -10,3 +9,19 @@ logs
 balance_hash.txt
 balance_hash_*.txt
 linuxdo_reads
+
+# Claude
+.claude/**/*.local.*
+.mcp.json
+
+# Cursor
+.cursor/mcp.json
+
+# Gemini
+.gemini/settings.json
+
+# Opencode
+opencode.json
+
+# Git Worktree
+.worktree/
