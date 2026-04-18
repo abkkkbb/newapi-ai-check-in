@@ -88,6 +88,26 @@ jobs:
         restore-keys: |
           storage-state-
 
+    - name: 从 secret 注入 storage state (bootstrap 用)
+      env:
+        STORAGE_STATES_JSON: ${{ secrets.STORAGE_STATES_JSON }}
+      run: |
+        if (-not $env:STORAGE_STATES_JSON) {
+          echo "ℹ️ STORAGE_STATES_JSON 未配置，跳过"
+          exit 0
+        }
+        New-Item -ItemType Directory -Force -Path storage-states | Out-Null
+        $data = $env:STORAGE_STATES_JSON | ConvertFrom-Json
+        foreach ($prop in $data.PSObject.Properties) {
+          $path = "storage-states/linuxdo_$($prop.Name)_storage_state.json"
+          if (Test-Path $path) {
+            echo "⏭️  已存在，跳过: $path"
+            continue
+          }
+          $prop.Value | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $path -Encoding utf8
+          echo "✅ 写入: $path"
+        }
+
     - name: 恢复帖子ID缓存
       uses: actions/cache/restore@v4
       with:
