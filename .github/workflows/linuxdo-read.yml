@@ -97,11 +97,63 @@ jobs:
         restore-keys: |
           linuxdo-reads-
 
+    - name: 启动 Xray 代理
+      env:
+        VLESS_URL: ${{ secrets.VLESS_URL }}
+      run: |
+        if (-not $env:VLESS_URL) {
+          echo "ℹ️ VLESS_URL 未配置，跳过 Xray 代理"
+          exit 0
+        }
+        $ErrorActionPreference = "Stop"
+
+        # 下载 Xray
+        $xrayUrl = "https://github.com/XTLS/Xray-core/releases/download/v25.3.6/Xray-windows-64.zip"
+        echo "⬇️ 正在下载 Xray..."
+        curl.exe -fSL -o xray.zip $xrayUrl
+        Expand-Archive -Path xray.zip -DestinationPath xray -Force
+        Remove-Item xray.zip
+
+        # 验证二进制
+        & xray\xray.exe version
+
+        # 生成配置
+        echo "⚙️ 正在生成 Xray 配置..."
+        uv run python scripts/setup_xray.py
+
+        # 后台启动 Xray
+        echo "🚀 正在启动 Xray..."
+        $proc = Start-Process -FilePath "xray\xray.exe" `
+          -ArgumentList "run", "-config", "xray_config.json" `
+          -WindowStyle Hidden -PassThru
+        echo "Xray PID: $($proc.Id)"
+
+        # 等待 SOCKS5 端口就绪
+        $ready = $false
+        for ($i = 0; $i -lt 30; $i++) {
+          try {
+            $tcp = New-Object System.Net.Sockets.TcpClient
+            $tcp.Connect("127.0.0.1", 1080)
+            $tcp.Close()
+            $ready = $true
+            break
+          } catch {
+            Start-Sleep -Seconds 1
+          }
+        }
+        if (-not $ready) {
+          echo "❌ SOCKS5 端口 1080 在 30 秒内未就绪"
+          if (Test-Path xray_error.log) { Get-Content xray_error.log }
+          exit 1
+        }
+        echo "✅ Xray 代理已就绪 (socks5://127.0.0.1:1080)"
+
     - name: 执行阅读帖子
       env:
         ACCOUNTS: ${{ secrets.ACCOUNTS_LINUX_DO }}
         LINUXDO_BASE_TOPIC_ID: ${{ secrets.LINUXDO_BASE_TOPIC_ID }}
         LINUXDO_MAX_POSTS: ${{ secrets.LINUXDO_MAX_POSTS }}
+        PROXY: ${{ secrets.VLESS_URL && 'socks5://127.0.0.1:1080' || secrets.PROXY }}
         DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
@@ -147,6 +199,8 @@ jobs:
         path: |
           logs/
           screenshots/
+          xray_access.log
+          xray_error.log
         if-no-files-found: ignore
         retention-days: 7
 

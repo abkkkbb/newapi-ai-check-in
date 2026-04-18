@@ -20,9 +20,9 @@ from utils.mask_utils import mask_username
 # 默认缓存目录，与 checkin.py 保持一致
 DEFAULT_STORAGE_STATE_DIR = "storage-states"
 
-# 帖子起始 ID，从环境变量获取，默认 随机从100000-100200选一个
+# 帖子起始 ID，从环境变量获取，默认 随机从120000-120200选一个
 # 通过 LINUXDO_BASE_TOPIC_ID 环境变量设置自定义值
-DEFAULT_BASE_TOPIC_ID = random.randint(100000, 100200)
+DEFAULT_BASE_TOPIC_ID = random.randint(120000, 120200)
 
 # 默认最大浏览帖子数
 # 通过 LINUXDO_MAX_POSTS 环境变量设置自定义值
@@ -251,6 +251,25 @@ class LinuxDoReadPosts:
             await take_screenshot(page, "login_error", self.username)
             return False
 
+    @staticmethod
+    def _load_proxy() -> dict | None:
+        """从 PROXY 环境变量加载代理配置
+
+        Returns:
+            代理配置字典，格式为 {"server": "...", "username": "...", "password": "..."}，
+            或 None（未配置代理）
+        """
+        proxy_str = os.getenv("PROXY", "").strip()
+        if not proxy_str:
+            return None
+        try:
+            proxy = json.loads(proxy_str)
+            if isinstance(proxy, dict) and "server" in proxy:
+                return proxy
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return {"server": proxy_str}
+
     def _load_topic_id(self) -> int:
         """从缓存文件读取上次的 topic_id
 
@@ -311,9 +330,10 @@ class LinuxDoReadPosts:
         consecutive_invalid_count = 0  # 连续无效帖子计数，用于终止任务
         jump_invalid_count = 0  # 连续无效帖子计数，用于决定是否跳跃
         cf_block_count = 0  # 连续 Cloudflare 阻断计数
+        rate_limit_delay = 10  # 429 退避延迟（秒），逐次递增
 
         while read_count < max_posts:
-            await page.wait_for_timeout(random.randint(1000, 3000))
+            await page.wait_for_timeout(random.randint(3000, 8000))
 
             if consecutive_invalid_count > 50:
                 print(
@@ -338,7 +358,7 @@ class LinuxDoReadPosts:
                 response = await page.goto(topic_url, wait_until="domcontentloaded")
 
                 # Discourse 存在长轮询，networkidle 不可靠，用轻量延迟替代
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(3000)
 
                 # 检测 Cloudflare challenge（不计入无效帖子计数）
                 if await self._is_cf_challenge(page):
@@ -366,6 +386,21 @@ class LinuxDoReadPosts:
                         )
                         continue
 
+                # HTTP 429 速率限制：等待后重试同一帖子
+                if response and response.status == 429:
+                    print(
+                        f"⚠️ {self.masked_username}: Rate limited (429), "
+                        f"waiting {rate_limit_delay}s before retry..."
+                    )
+                    await page.wait_for_timeout(rate_limit_delay * 1000)
+                    rate_limit_delay = min(rate_limit_delay + 10, 60)
+                    # 回退 topic_id 让下次循环重试同一帖子
+                    current_topic_id -= random.randint(1, 3)
+                    continue
+
+                # 请求成功，重置 429 退避延迟
+                rate_limit_delay = 10
+
                 # HTTP 404/410 明确表示帖子不存在
                 if response and response.status in (404, 410):
                     print(f"⚠️ {self.masked_username}: Topic {current_topic_id} HTTP {response.status}, skipping...")
@@ -377,7 +412,28 @@ class LinuxDoReadPosts:
                 try:
                     await page.wait_for_selector("#topic-title, .topic-post, .topic-body", timeout=15000)
                 except Exception:
-                    print(f"⚠️ {self.masked_username}: Topic {current_topic_id} page not loaded in time, skipping...")
+                    # 诊断：输出页面实际状态
+                    diag_url = page.url
+                    diag_title = await page.title()
+                    diag_html = await page.evaluate("() => document.documentElement.outerHTML.substring(0, 500)")
+
+                    # 检测页面内容中的 429 Too Many Requests（Firefox 可能直接渲染为纯文本）
+                    if "Too Many Requests" in diag_html:
+                        print(
+                            f"⚠️ {self.masked_username}: Rate limited (429 in page body), "
+                            f"waiting {rate_limit_delay}s before retry..."
+                        )
+                        await page.wait_for_timeout(rate_limit_delay * 1000)
+                        rate_limit_delay = min(rate_limit_delay + 10, 60)
+                        current_topic_id -= random.randint(1, 3)
+                        continue
+
+                    print(
+                        f"⚠️ {self.masked_username}: Topic {current_topic_id} page not loaded in time, skipping...\n"
+                        f"   URL: {diag_url}\n"
+                        f"   Title: {diag_title}\n"
+                        f"   HTML preview: {diag_html[:200]}"
+                    )
                     await take_screenshot(page, f"topic_not_loaded_{current_topic_id}", self.username)
                     consecutive_invalid_count += 1
                     jump_invalid_count += 1
@@ -547,14 +603,24 @@ class LinuxDoReadPosts:
         else:
             use_headless = False
 
-        async with AsyncCamoufox(
-            headless=use_headless,
-            humanize=True,
-            locale="en-US",
-            config={
+        # 代理配置：从 PROXY 环境变量加载
+        proxy_config = self._load_proxy()
+        if proxy_config:
+            print(f"ℹ️ {self.masked_username}: Using proxy: {proxy_config.get('server', 'unknown')}")
+
+        camoufox_kwargs = {
+            "headless": use_headless,
+            "humanize": True,
+            "locale": "en-US",
+            "config": {
                 "forceScopeAccess": True,
             },
-        ) as browser:
+        }
+        if proxy_config:
+            camoufox_kwargs["proxy"] = proxy_config
+            camoufox_kwargs["geoip"] = True
+
+        async with AsyncCamoufox(**camoufox_kwargs) as browser:
             # 加载缓存的 storage state（如果存在）
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
             if storage_state:
