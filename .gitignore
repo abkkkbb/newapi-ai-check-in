@@ -9,6 +9,8 @@ logs
 balance_hash.txt
 balance_hash_*.txt
 linuxdo_reads
+logs_*
+secret_payload.json
 **backup**
 
 # Claude
