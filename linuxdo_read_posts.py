@@ -178,9 +178,13 @@ class LinuxDoReadPosts:
             current_url = page.url
             print(f"ℹ️ {self.masked_username}: Current URL: {current_url}")
 
-            # 如果跳转到登录页面，说明未登录
             if current_url.startswith("https://linux.do/login"):
                 print(f"ℹ️ {self.masked_username}: Redirected to login page, not logged in")
+                return False
+
+            cookies = await page.context.cookies("https://linux.do")
+            if not any(c.get("name") == "_t" and c.get("value") for c in cookies):
+                print(f"ℹ️ {self.masked_username}: Auth cookie _t missing, not logged in")
                 return False
 
             print(f"✅ {self.masked_username}: Already logged in")
