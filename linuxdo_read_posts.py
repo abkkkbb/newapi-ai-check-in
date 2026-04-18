@@ -230,9 +230,14 @@ class LinuxDoReadPosts:
             await page.fill("#login-account-password", self.password)
             await page.wait_for_timeout(2000)
 
-            # 点击登录按钮
-            await page.click("#login-button")
-            await page.wait_for_timeout(10000)
+            # 人工模式：用户手动过 hCaptcha 并点登录
+            if os.getenv("LINUXDO_MANUAL_LOGIN", "").strip().lower() in ("1", "true", "yes"):
+                print(f"👉 {self.masked_username}: 请在浏览器中手动完成人机验证并点击登录，然后在此按回车继续...")
+                await asyncio.get_event_loop().run_in_executor(None, input)
+            else:
+                # 点击登录按钮
+                await page.click("#login-button")
+                await page.wait_for_timeout(10000)
 
             await save_page_content_to_file(page, "login_result", self.username)
 
@@ -625,6 +630,13 @@ class LinuxDoReadPosts:
                 "forceScopeAccess": True,
             },
         }
+        window_env = os.getenv("LINUXDO_WINDOW", "").strip()
+        if window_env:
+            try:
+                w, h = (int(x) for x in window_env.split(",", 1))
+                camoufox_kwargs["window"] = (w, h)
+            except ValueError:
+                print(f"⚠️ {self.masked_username}: Invalid LINUXDO_WINDOW={window_env}, expected W,H")
         if proxy_config:
             camoufox_kwargs["proxy"] = proxy_config
             camoufox_kwargs["geoip"] = True
@@ -637,7 +649,10 @@ class LinuxDoReadPosts:
             else:
                 print(f"ℹ️ {self.masked_username}: No cache file found, starting fresh")
 
-            context = await browser.new_context(storage_state=storage_state)
+            context_kwargs = {"storage_state": storage_state}
+            if window_env and "window" in camoufox_kwargs:
+                context_kwargs["viewport"] = None  # 让页面用窗口实际尺寸
+            context = await browser.new_context(**context_kwargs)
             page = await context.new_page()
 
             async with ClickSolver(
