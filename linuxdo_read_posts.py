@@ -183,12 +183,26 @@ class LinuxDoReadPosts:
                 return False
 
             cookies = await page.context.cookies("https://linux.do")
-            if not any(c.get("name") == "_t" and c.get("value") for c in cookies):
-                print(f"ℹ️ {self.masked_username}: Auth cookie _t missing, not logged in")
-                return False
+            cookie_names = {c.get("name") for c in cookies if c.get("value")}
+            print(f"ℹ️ {self.masked_username}: Cookies present: {sorted(cookie_names)}")
 
-            print(f"✅ {self.masked_username}: Already logged in")
-            return True
+            try:
+                resp = await page.context.request.get(
+                    "https://linux.do/session/current.json",
+                    headers={"Accept": "application/json"},
+                )
+                if resp.status == 200:
+                    data = await resp.json()
+                    user = (data or {}).get("current_user") or {}
+                    username = user.get("username")
+                    if username:
+                        print(f"✅ {self.masked_username}: session/current.json verified user={username}")
+                        return True
+                print(f"ℹ️ {self.masked_username}: session/current.json status={resp.status}, not logged in")
+                return False
+            except Exception as e:
+                print(f"⚠️ {self.masked_username}: session check error: {e}")
+                return False
         except Exception as e:
             print(f"⚠️ {self.masked_username}: Error checking login status: {e}")
             return False
