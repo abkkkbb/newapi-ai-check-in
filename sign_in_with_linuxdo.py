@@ -11,6 +11,9 @@ from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
 from utils.browser_utils import filter_cookies, take_screenshot, save_page_content_to_file
 from utils.config import ProviderConfig
 from utils.get_headers import get_browser_headers, print_browser_headers
+from utils.storage_state import ensure_storage_state_from_env
+
+STORAGE_STATE_ENV_NAME = "STORATE_STATES_LINUXDO"
 
 
 class LinuxDoSignIn:
@@ -72,6 +75,13 @@ class LinuxDoSignIn:
                 "forceScopeAccess": True,
             },
         ) as browser:
+            ensure_storage_state_from_env(
+                    cache_file_path,
+                    self.account_name,
+                    self.username,
+                    env_name=STORAGE_STATE_ENV_NAME,
+            )
+            
             # 只有在缓存文件存在时才加载 storage_state
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
             if storage_state:
