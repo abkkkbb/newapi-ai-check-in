@@ -124,32 +124,39 @@ class LinuxDoReadPosts:
             print(f"⚠️ {self.masked_username}: ClickSolver not initialized, cannot solve CF")
             return False
 
+        solver_ok = True
+        solver_err: Exception | None = None
         try:
             print(f"ℹ️ {self.masked_username}: Attempting to auto-solve Cloudflare challenge...")
             await self.solver.solve_captcha(
                 captcha_container=page, captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
             )
-            await page.wait_for_timeout(8000)
-
-            # 等待页面完成跳转后再验证
-            try:
-                await page.wait_for_load_state("domcontentloaded", timeout=10000)
-            except Exception:
-                pass
-
-            # 验证是否通过：URL 已离开 challenge 或页面不再是 CF 页面
-            current_url = page.url
-            if "__cf_chl" not in current_url and "/challenge" not in current_url:
-                still_cf = await self._is_cf_challenge(page)
-                if not still_cf:
-                    print(f"✅ {self.masked_username}: Cloudflare challenge auto-solved")
-                    return True
-
-            print(f"⚠️ {self.masked_username}: CF challenge still present after solve attempt")
-            return False
         except Exception as e:
-            print(f"⚠️ {self.masked_username}: CF auto-solve failed: {e}")
-            return False
+            solver_ok = False
+            solver_err = e
+
+        await page.wait_for_timeout(8000)
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=10000)
+        except Exception:
+            pass
+
+        # solver 报错也可能页面已自动放行，所以最终以页面状态为准
+        current_url = page.url
+        if "__cf_chl" not in current_url and "/challenge" not in current_url:
+            still_cf = await self._is_cf_challenge(page)
+            if not still_cf:
+                if solver_ok:
+                    print(f"✅ {self.masked_username}: Cloudflare challenge solved by solver")
+                else:
+                    print(f"✅ {self.masked_username}: Cloudflare cleared (solver failed but page passed)")
+                return True
+
+        if solver_err:
+            print(f"⚠️ {self.masked_username}: CF auto-solve failed: {solver_err}")
+        else:
+            print(f"⚠️ {self.masked_username}: CF challenge still present after solve attempt")
+        return False
 
     async def _is_logged_in(self, page) -> bool:
         """检查是否已登录
