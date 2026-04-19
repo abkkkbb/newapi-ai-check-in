@@ -100,12 +100,13 @@ jobs:
         $data = $env:STORAGE_STATES_JSON | ConvertFrom-Json
         foreach ($prop in $data.PSObject.Properties) {
           $path = "storage-states/linuxdo_$($prop.Name)_storage_state.json"
-          if (Test-Path $path) {
-            echo "⏭️  已存在，跳过: $path"
-            continue
-          }
+          $existed = Test-Path $path
           $prop.Value | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $path -Encoding utf8
-          echo "✅ 写入: $path"
+          if ($existed) {
+            echo "🔄 覆盖: $path"
+          } else {
+            echo "✅ 写入: $path"
+          }
         }
 
     - name: 恢复帖子ID缓存
