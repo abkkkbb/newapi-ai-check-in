@@ -17,10 +17,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 OUTPUT_PATH = "xray_config.json"
 
 # Reality 协议必须的 URL 参数
-REQUIRED_PARAMS = ("pbk", "fp", "sni", "sid")
+REALITY_REQUIRED_PARAMS = ("pbk", "fp", "sni", "sid")
 
-# 允许的传输类型（当前仅支持 tcp）
-ALLOWED_NETWORK_TYPES = ("tcp",)
+# 支持的 security
+ALLOWED_SECURITY = ("reality", "tls")
+
+# 支持的传输类型
+ALLOWED_NETWORK_TYPES = ("tcp", "ws", "grpc")
 
 
 def _mask(value: str, visible_head: int = 4, visible_tail: int = 4) -> str:
@@ -72,24 +75,56 @@ def parse_vless_url(url: str) -> dict:
     security = _get_single(params, "security").lower()
     network = _get_single(params, "type").lower() or "tcp"
 
-    if security != "reality":
-        raise ValueError(f"security 必须为 reality，实际为: {security or '<empty>'}")
+    if security not in ALLOWED_SECURITY:
+        raise ValueError(
+            f"security 必须为 {'/'.join(ALLOWED_SECURITY)}，实际为: {security or '<empty>'}"
+        )
 
     if network not in ALLOWED_NETWORK_TYPES:
         raise ValueError(f"不支持的传输类型: {network}（仅支持 {', '.join(ALLOWED_NETWORK_TYPES)}）")
 
-    # 校验 Reality 必须参数
-    result = {"uuid": uuid, "host": host, "port": port, "network": network}
-    for key in REQUIRED_PARAMS:
-        value = _get_single(params, key)
-        if not value:
-            raise ValueError(f"缺少 Reality 必须参数: {key}")
-        result[key] = value
+    result: dict = {
+        "uuid": uuid,
+        "host": host,
+        "port": port,
+        "network": network,
+        "security": security,
+    }
 
-    # 可选参数
-    spx = _get_single(params, "spx")
-    if spx:
-        result["spx"] = unquote(spx)
+    if security == "reality":
+        for key in REALITY_REQUIRED_PARAMS:
+            value = _get_single(params, key)
+            if not value:
+                raise ValueError(f"缺少 Reality 必须参数: {key}")
+            result[key] = value
+        spx = _get_single(params, "spx")
+        if spx:
+            result["spx"] = unquote(spx)
+    else:
+        # TLS: sni/fp 可选；alpn/allowInsecure 可选
+        sni = _get_single(params, "sni") or _get_single(params, "peer")
+        if sni:
+            result["sni"] = sni
+        fp = _get_single(params, "fp")
+        if fp:
+            result["fp"] = fp
+        alpn = _get_single(params, "alpn")
+        if alpn:
+            result["alpn"] = [x for x in unquote(alpn).split(",") if x]
+        result["allowInsecure"] = _get_single(params, "allowInsecure") in ("1", "true")
+
+    # 传输层可选参数
+    if network == "ws":
+        path = _get_single(params, "path")
+        if path:
+            result["ws_path"] = unquote(path)
+        ws_host = _get_single(params, "host")
+        if ws_host:
+            result["ws_host"] = ws_host
+    elif network == "grpc":
+        service_name = _get_single(params, "serviceName") or _get_single(params, "servicename")
+        if service_name:
+            result["grpc_service_name"] = unquote(service_name)
 
     flow = _get_single(params, "flow")
     if flow:
@@ -112,14 +147,45 @@ def build_xray_config(vless: dict, socks_port: int) -> dict:
     if "flow" in vless:
         user_obj["flow"] = vless["flow"]
 
-    reality_settings: dict = {
-        "publicKey": vless["pbk"],
-        "fingerprint": vless["fp"],
-        "serverName": vless["sni"],
-        "shortId": vless["sid"],
+    stream_settings: dict = {
+        "network": vless["network"],
+        "security": vless["security"],
     }
-    if "spx" in vless:
-        reality_settings["spiderX"] = vless["spx"]
+
+    if vless["security"] == "reality":
+        reality_settings: dict = {
+            "publicKey": vless["pbk"],
+            "fingerprint": vless["fp"],
+            "serverName": vless["sni"],
+            "shortId": vless["sid"],
+        }
+        if "spx" in vless:
+            reality_settings["spiderX"] = vless["spx"]
+        stream_settings["realitySettings"] = reality_settings
+    else:
+        tls_settings: dict = {}
+        if "sni" in vless:
+            tls_settings["serverName"] = vless["sni"]
+        if "fp" in vless:
+            tls_settings["fingerprint"] = vless["fp"]
+        if "alpn" in vless:
+            tls_settings["alpn"] = vless["alpn"]
+        if vless.get("allowInsecure"):
+            tls_settings["allowInsecure"] = True
+        stream_settings["tlsSettings"] = tls_settings
+
+    if vless["network"] == "ws":
+        ws_settings: dict = {}
+        if "ws_path" in vless:
+            ws_settings["path"] = vless["ws_path"]
+        if "ws_host" in vless:
+            ws_settings["headers"] = {"Host": vless["ws_host"]}
+        stream_settings["wsSettings"] = ws_settings
+    elif vless["network"] == "grpc":
+        grpc_settings: dict = {}
+        if "grpc_service_name" in vless:
+            grpc_settings["serviceName"] = vless["grpc_service_name"]
+        stream_settings["grpcSettings"] = grpc_settings
 
     return {
         "log": {
@@ -147,11 +213,7 @@ def build_xray_config(vless: dict, socks_port: int) -> dict:
                         }
                     ]
                 },
-                "streamSettings": {
-                    "network": vless["network"],
-                    "security": "reality",
-                    "realitySettings": reality_settings,
-                },
+                "streamSettings": stream_settings,
             }
         ],
     }
@@ -171,12 +233,18 @@ def main() -> int:
         return 1
 
     # 脱敏日志
-    print(
+    summary = (
         f"VLESS 参数: uuid={_mask(vless['uuid'])}, "
         f"host={vless['host']}, port={vless['port']}, "
-        f"sni={vless['sni']}, fp={vless['fp']}, "
-        f"pbk={_mask(vless['pbk'])}, sid={_mask(vless['sid'], 2, 2)}"
+        f"security={vless['security']}, network={vless['network']}"
     )
+    if "sni" in vless:
+        summary += f", sni={vless['sni']}"
+    if "fp" in vless:
+        summary += f", fp={vless['fp']}"
+    if vless["security"] == "reality":
+        summary += f", pbk={_mask(vless['pbk'])}, sid={_mask(vless['sid'], 2, 2)}"
+    print(summary)
 
     # SOCKS5 端口
     socks_port_str = os.getenv("SOCKS_PORT", "1080").strip()
