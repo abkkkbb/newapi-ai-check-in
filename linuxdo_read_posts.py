@@ -189,17 +189,36 @@ class LinuxDoReadPosts:
                 print(f"ℹ️ {self.masked_username}: Redirected to login page, not logged in")
                 return False
 
-            cookies = await page.context.cookies("https://linux.do")
-            session_cookies = {"_forum_session", "_t"}
-            has_session = any(
-                c.get("name") in session_cookies and c.get("value") for c in cookies
+            # Discourse 只在登录态下渲染 current-user 元素
+            user_info = await page.evaluate(
+                """
+                () => {
+                    const el = document.querySelector('meta[name="current-user"]');
+                    const body = document.body ? document.body.className : '';
+                    const avatar = document.querySelector(
+                        '#current-user, .header-dropdown-toggle.current-user, #toggle-current-user'
+                    );
+                    return {
+                        hasMeta: !!el,
+                        metaContent: el ? el.getAttribute('content') : null,
+                        hasAvatar: !!avatar,
+                        bodyClass: body,
+                    };
+                }
+                """
             )
-            if not has_session:
-                cookie_names = sorted({c.get("name") for c in cookies if c.get("value")})
-                print(f"ℹ️ {self.masked_username}: No session cookie, cookies={cookie_names}")
+            if not (user_info.get("hasMeta") or user_info.get("hasAvatar")):
+                print(
+                    f"ℹ️ {self.masked_username}: Not authenticated "
+                    f"(meta={user_info.get('hasMeta')}, avatar={user_info.get('hasAvatar')}, "
+                    f"body='{user_info.get('bodyClass')}')"
+                )
                 return False
 
-            print(f"✅ {self.masked_username}: Already logged in")
+            print(
+                f"✅ {self.masked_username}: Already logged in "
+                f"(meta={user_info.get('metaContent')})"
+            )
             return True
         except Exception as e:
             print(f"⚠️ {self.masked_username}: Error checking login status: {e}")
