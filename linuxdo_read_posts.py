@@ -124,16 +124,13 @@ class LinuxDoReadPosts:
             print(f"⚠️ {self.masked_username}: ClickSolver not initialized, cannot solve CF")
             return False
 
-        solver_ok = True
-        solver_err: Exception | None = None
         try:
             print(f"ℹ️ {self.masked_username}: Attempting to auto-solve Cloudflare challenge...")
             await self.solver.solve_captcha(
                 captcha_container=page, captcha_type=CaptchaType.CLOUDFLARE_INTERSTITIAL
             )
-        except Exception as e:
-            solver_ok = False
-            solver_err = e
+        except Exception:
+            pass  # library 内部会重试并吃掉异常，最终以页面状态判断
 
         await page.wait_for_timeout(8000)
         try:
@@ -141,21 +138,14 @@ class LinuxDoReadPosts:
         except Exception:
             pass
 
-        # solver 报错也可能页面已自动放行，所以最终以页面状态为准
         current_url = page.url
         if "__cf_chl" not in current_url and "/challenge" not in current_url:
             still_cf = await self._is_cf_challenge(page)
             if not still_cf:
-                if solver_ok:
-                    print(f"✅ {self.masked_username}: Cloudflare challenge solved by solver")
-                else:
-                    print(f"✅ {self.masked_username}: Cloudflare cleared (solver failed but page passed)")
+                print(f"✅ {self.masked_username}: Cloudflare cleared")
                 return True
 
-        if solver_err:
-            print(f"⚠️ {self.masked_username}: CF auto-solve failed: {solver_err}")
-        else:
-            print(f"⚠️ {self.masked_username}: CF challenge still present after solve attempt")
+        print(f"⚠️ {self.masked_username}: CF challenge still present after solve attempt")
         return False
 
     async def _is_logged_in(self, page) -> bool:
