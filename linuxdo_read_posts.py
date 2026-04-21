@@ -638,10 +638,25 @@ class LinuxDoReadPosts:
         if proxy_config:
             print(f"ℹ️ {self.masked_username}: Using proxy: {proxy_config.get('server', 'unknown')}")
 
+        # 按 username 派生固定随机种子，让每次 run 生成相同的 Camoufox 指纹，
+        # 避免 Discourse/Cloudflare 把 session + 变化的指纹 判定为可疑
+        import random as _random
+        from browserforge.fingerprints import FingerprintGenerator
+        seed = int.from_bytes(self.username_hash.encode(), "big") % (2**32)
+        rng_state = _random.getstate()
+        _random.seed(seed)
+        try:
+            stable_fingerprint = FingerprintGenerator().generate(
+                browser="firefox", os="windows"
+            )
+        finally:
+            _random.setstate(rng_state)
+
         camoufox_kwargs = {
             "headless": use_headless,
             "humanize": True,
             "locale": "en-US",
+            "fingerprint": stable_fingerprint,
             "config": {
                 "forceScopeAccess": True,
             },
