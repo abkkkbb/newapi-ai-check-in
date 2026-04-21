@@ -797,13 +797,28 @@ async def main():
         print(f"{'='*50}")
 
         try:
-            reader = LinuxDoReadPosts(
-                username=username,
-                password=password,
-            )
+            max_retries_str = os.getenv("LINUXDO_RETRIES", "2").strip()
+            try:
+                max_retries = max(1, int(max_retries_str))
+            except ValueError:
+                max_retries = 2
 
             start_time = datetime.now()
-            success, result = await reader.run()
+            success = False
+            result: dict = {"error": "No attempts"}
+            for attempt in range(1, max_retries + 1):
+                reader = LinuxDoReadPosts(username=username, password=password)
+                if attempt > 1:
+                    print(f"🔁 {masked_username}: Retry {attempt}/{max_retries}")
+                success, result = await reader.run()
+                if success:
+                    break
+                err = (result or {}).get("error", "")
+                # 只对偶发 CF/登录错误重试；密码错等硬失败不重试
+                if "Login failed" not in err and "Timeout" not in err and "Cloudflare" not in err:
+                    break
+                if attempt < max_retries:
+                    await asyncio.sleep(5)
             end_time = datetime.now()
             duration = end_time - start_time
 
