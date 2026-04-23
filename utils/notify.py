@@ -63,9 +63,19 @@ class NotificationKit:
 		msg['Subject'] = title
 
 		smtp_server = self.smtp_server if self.smtp_server else f'smtp.{self.email_user.split("@")[1]}'
-		with smtplib.SMTP_SSL(smtp_server, 465) as server:
-			server.login(self.email_user, self.email_pass)
-			server.send_message(msg)
+		last_err: Exception | None = None
+		for attempt in range(1, 4):
+			try:
+				with smtplib.SMTP_SSL(smtp_server, 465, timeout=30) as server:
+					server.login(self.email_user, self.email_pass)
+					server.send_message(msg)
+				return
+			except Exception as e:
+				last_err = e
+				if attempt < 3:
+					import time
+					time.sleep(5 * attempt)
+		raise last_err
 
 	def send_pushplus(self, title: str, content: str):
 		if not self.pushplus_token:
