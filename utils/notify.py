@@ -63,13 +63,14 @@ class NotificationKit:
 		msg['Subject'] = title
 
 		smtp_server = self.smtp_server if self.smtp_server else f'smtp.{self.email_user.split("@")[1]}'
+		# 只对连接/登录阶段重试，send_message 不重试以避免重复投递
+		server = None
 		last_err: Exception | None = None
 		for attempt in range(1, 4):
-			server = None
 			try:
 				server = smtplib.SMTP_SSL(smtp_server, 465, timeout=30)
 				server.login(self.email_user, self.email_pass)
-				server.send_message(msg)
+				break
 			except Exception as e:
 				last_err = e
 				if server is not None:
@@ -77,17 +78,19 @@ class NotificationKit:
 						server.close()
 					except Exception:
 						pass
+					server = None
 				if attempt < 3:
 					import time
 					time.sleep(5 * attempt)
-				continue
-			# 邮件已投递成功；quit 失败不算作发送失败，避免重发
+		if server is None:
+			raise last_err
+		try:
+			server.send_message(msg)
+		finally:
 			try:
 				server.quit()
 			except Exception:
 				pass
-			return
-		raise last_err
 
 	def send_pushplus(self, title: str, content: str):
 		if not self.pushplus_token:
