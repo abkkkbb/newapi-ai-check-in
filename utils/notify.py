@@ -65,16 +65,28 @@ class NotificationKit:
 		smtp_server = self.smtp_server if self.smtp_server else f'smtp.{self.email_user.split("@")[1]}'
 		last_err: Exception | None = None
 		for attempt in range(1, 4):
+			server = None
 			try:
-				with smtplib.SMTP_SSL(smtp_server, 465, timeout=30) as server:
-					server.login(self.email_user, self.email_pass)
-					server.send_message(msg)
-				return
+				server = smtplib.SMTP_SSL(smtp_server, 465, timeout=30)
+				server.login(self.email_user, self.email_pass)
+				server.send_message(msg)
 			except Exception as e:
 				last_err = e
+				if server is not None:
+					try:
+						server.close()
+					except Exception:
+						pass
 				if attempt < 3:
 					import time
 					time.sleep(5 * attempt)
+				continue
+			# 邮件已投递成功；quit 失败不算作发送失败，避免重发
+			try:
+				server.quit()
+			except Exception:
+				pass
+			return
 		raise last_err
 
 	def send_pushplus(self, title: str, content: str):
