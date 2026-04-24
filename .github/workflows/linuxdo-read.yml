@@ -92,21 +92,28 @@ jobs:
     - name: 从 secret 注入 storage state (bootstrap 用)
       env:
         STORAGE_STATES_JSON: ${{ secrets.STORAGE_STATES_JSON }}
+        FORCE_STORAGE_OVERWRITE: ${{ vars.FORCE_STORAGE_OVERWRITE }}
       run: |
         if (-not $env:STORAGE_STATES_JSON) {
           echo "ℹ️ STORAGE_STATES_JSON 未配置，跳过"
           exit 0
         }
         New-Item -ItemType Directory -Force -Path storage-states | Out-Null
+        $force = $env:FORCE_STORAGE_OVERWRITE -in @('1','true','yes')
         $data = $env:STORAGE_STATES_JSON | ConvertFrom-Json
         foreach ($prop in $data.PSObject.Properties) {
           $path = "storage-states/linuxdo_$($prop.Name)_storage_state.json"
-          $existed = Test-Path $path
+          if ((Test-Path $path) -and -not $force) {
+            echo "⏭️  cache 已有，跳过（保留续期后的 cookie）: $path"
+            continue
+          }
           $prop.Value | ConvertTo-Json -Depth 20 -Compress | Set-Content -Path $path -Encoding utf8
-          if ($existed) {
-            echo "🔄 覆盖: $path"
-          } else {
-            echo "✅ 写入: $path"
+          if (Test-Path $path) {
+            if ($force) {
+              echo "🔄 强制覆盖（FORCE_STORAGE_OVERWRITE=1）: $path"
+            } else {
+              echo "✅ 写入（cache 未命中）: $path"
+            }
           }
         }
 
