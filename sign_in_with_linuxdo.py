@@ -5,10 +5,12 @@
 
 import json
 import os
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
+
 from camoufox.async_api import AsyncCamoufox
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
-from utils.browser_utils import filter_cookies, take_screenshot, save_page_content_to_file
+
+from utils.browser_utils import filter_cookies, save_page_content_to_file, take_screenshot
 from utils.config import ProviderConfig
 from utils.get_headers import get_browser_headers, print_browser_headers
 from utils.storage_state import ensure_storage_state_from_env
@@ -81,7 +83,7 @@ class LinuxDoSignIn:
                     self.username,
                     env_name=STORAGE_STATE_ENV_NAME,
             )
-            
+
             # 只有在缓存文件存在时才加载 storage_state
             storage_state = cache_file_path if os.path.exists(cache_file_path) else None
             if storage_state:
@@ -146,6 +148,16 @@ class LinuxDoSignIn:
 
                     # 如果未登录，则执行登录流程
                     if not is_logged_in:
+                        run_login_manual = os.getenv('RUN_LINUXDO_LOGIN_MANUAL')
+                        print(f"ℹ️ {self.account_name}: Run log-in manual env is {run_login_manual}")
+                        if run_login_manual != 'true':
+                            print(
+                                f"❌ {self.account_name}: Log-in faild\n"
+                                f"Current page is: {page.url}"
+                            )
+                            await take_screenshot(page, "logged_in_failed", self.account_name)
+                            return False, {"error": "Linux.do log-in failed"}, None
+
                         try:
                             print(f"ℹ️ {self.account_name}: Starting to sign in linux.do")
 
@@ -243,7 +255,7 @@ class LinuxDoSignIn:
                                         print(f"⚠️ {self.account_name}: Auto-solve failed: {solve_err}")
                                 else:
                                     print(f"ℹ️ {self.account_name}: No Cloudflare challenge detected, proceeding to redirect")
-                                    
+
                             except Exception as e:
                                 print(f"⚠️ {self.account_name}: Error checking Cloudflare challenge: {e}")
                         else:
@@ -262,7 +274,7 @@ class LinuxDoSignIn:
                     # 标记是否检测到 Cloudflare 验证页面
                     cloudflare_challenge_detected = False
 
-                    try:                  
+                    try:
                         # 先检查是否已跳转到 /console/token（Cloudflare 挑战等待期间可能已完成跳转）
                         console_token_pattern = f"**{self.provider_config.origin}/console/token**"
                         try:
@@ -303,6 +315,7 @@ class LinuxDoSignIn:
 
                     # 从 localStorage 获取 user 对象并提取 id
                     api_user = None
+                    current_url = page.url
                     try:
                         try:
                             await page.wait_for_function('localStorage.getItem("user") !== null', timeout=10000)
@@ -348,7 +361,7 @@ class LinuxDoSignIn:
                     else:
                         print(f"⚠️ {self.account_name}: OAuth callback received but no user ID found")
                         await take_screenshot(page, "oauth_failed_no_user_id_bypass", self.account_name)
-                        parsed_url = urlparse(page.url)
+                        parsed_url = urlparse(current_url)
                         query_params = parse_qs(parsed_url.query)
 
                         # 如果 query 中包含 code，说明 OAuth 回调成功
@@ -368,7 +381,10 @@ class LinuxDoSignIn:
                                 )
                             return True, query_params, browser_headers
                         else:
-                            print(f"❌ {self.account_name}: OAuth failed, no code in callback")
+                            print(
+                                f"❌ {self.account_name}: OAuth failed, no code in callback\n"
+                                f"Parsed url is: {current_url}"
+                            )
                             return (
                                 False,
                                 {

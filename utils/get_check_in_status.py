@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from curl_cffi import requests as curl_requests
 
+from utils.get_headers import get_curl_cffi_impersonate
 from utils.http_utils import proxy_resolve, response_resolve
 
 if TYPE_CHECKING:
@@ -24,7 +25,6 @@ def get_newapi_check_in_status(
     cookies: dict,
     headers: dict,
     path: str = "/api/user/checkin",
-    impersonate: str = "firefox135",
 ) -> bool:
     """
     查询标准 newapi 签到状态，自动拼接当前月份
@@ -35,7 +35,6 @@ def get_newapi_check_in_status(
         cookies: cookies 字典
         headers: 请求头字典
         path: 签到状态接口路径，默认为 "/api/user/checkin"
-        impersonate: curl_cffi 浏览器指纹模拟，默认为 "firefox135"
 
     Returns:
         bool: 今日是否已签到
@@ -44,11 +43,15 @@ def get_newapi_check_in_status(
     # 代理优先级: 账号配置 > 全局配置
     proxy_config = account_config.proxy or account_config.get("global_proxy")
     http_proxy = proxy_resolve(proxy_config)
-    
+
     current_month = datetime.now().strftime("%Y-%m")
     check_in_status_url = f"{provider_config.origin}{path}?month={current_month}"
 
     print(f"🔍 {account_name}: Getting check-in status")
+
+    # 根据 User-Agent 自动推断 impersonate 值
+    user_agent = headers.get("User-Agent", "")
+    impersonate = get_curl_cffi_impersonate(user_agent) if user_agent else "firefox135"
 
     try:
         session = curl_requests.Session(impersonate=impersonate, proxy=http_proxy, timeout=30)
@@ -100,7 +103,6 @@ def get_newapi_check_in_status(
 
 def create_newapi_check_in_status(
     path: str = "/api/user/checkin",
-    impersonate: str = "firefox135",
 ):
     """
     创建一个标准 newapi 签到状态查询函数
@@ -109,7 +111,6 @@ def create_newapi_check_in_status(
 
     Args:
         path: 签到状态接口路径，默认为 "/api/user/checkin"
-        impersonate: curl_cffi 浏览器指纹模拟，默认为 "firefox135"
 
     Returns:
         Callable: 签到状态查询函数，签名为 (provider_config, account_config, cookies, headers) -> bool
@@ -127,7 +128,6 @@ def create_newapi_check_in_status(
             cookies=cookies,
             headers=headers,
             path=path,
-            impersonate=impersonate,
         )
 
     return _check_status

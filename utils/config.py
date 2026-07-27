@@ -6,15 +6,14 @@
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Generator, AsyncGenerator, List, Literal
+from typing import AsyncGenerator, Callable, Dict, Generator, List, Literal
 
-from utils.get_check_in_status import newapi_check_in_status
 from utils.get_cdk import (
     get_runawaytime_cdk,
     get_x666_cdk,
-    get_b4u_cdk,
+    # get_b4u_cdk,
 )
-
+from utils.get_check_in_status import newapi_check_in_status
 
 # 前向声明 AccountConfig 类型，用于类型注解
 # 实际的 AccountConfig 类在后面定义
@@ -55,6 +54,7 @@ class ProviderConfig:
     linuxdo_auth_redirect_path: str = "/oauth/**"  # OAuth 回调路径匹配模式，支持通配符
     aliyun_captcha: bool = False
     bypass_method: Literal["waf_cookies", "cf_clearance"] | None = None
+    auto_add: bool = False
     isCustomize: bool = False  # 是否为自定义 provider（从环境变量加载）
 
     @classmethod
@@ -90,6 +90,7 @@ class ProviderConfig:
             linuxdo_auth_redirect_path=data.get("linuxdo_auth_redirect_path", "/oauth/**"),
             aliyun_captcha=data.get("aliyun_captcha", False),
             bypass_method=data.get("bypass_method"),
+            auto_add=data.get("auto_add", False),
             isCustomize=is_customize,
         )
 
@@ -211,6 +212,28 @@ class OAuthAccountConfig:
 
 
 @dataclass
+class SiteAccountConfig:
+    """站点账号密码配置"""
+
+    username: str
+    password: str
+    mode: Literal["auto", "api", "browser"] = "auto"
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SiteAccountConfig":
+        """从字典创建 SiteAccountConfig"""
+        mode = data.get("mode", "auto")
+        if mode not in ("auto", "api", "browser"):
+            mode = "auto"
+
+        return cls(
+            username=data.get("username", ""),
+            password=data.get("password", ""),
+            mode=mode,
+        )
+
+
+@dataclass
 class AccountConfig:
     """账号配置"""
 
@@ -220,6 +243,8 @@ class AccountConfig:
     name: str | None = None
     linux_do: List["OAuthAccountConfig"] | None = None  # 改为列表类型
     github: List["OAuthAccountConfig"] | None = None  # 改为列表类型
+    site: List["SiteAccountConfig"] | None = None
+    system_access_token: dict | str = ""
     proxy: dict | None = None
     extra: dict = field(default_factory=dict)  # 存储额外的配置字段
 
@@ -229,6 +254,7 @@ class AccountConfig:
         data: dict,
         linux_do_accounts: List["OAuthAccountConfig"] | None = None,
         github_accounts: List["OAuthAccountConfig"] | None = None,
+        site_accounts: List["SiteAccountConfig"] | None = None,
     ) -> "AccountConfig":
         """从字典创建 AccountConfig
 
@@ -236,26 +262,29 @@ class AccountConfig:
             data: 账号配置字典
             linux_do_accounts: 解析后的 Linux.do OAuth 账号列表（可选）
             github_accounts: 解析后的 GitHub OAuth 账号列表（可选）
+            site_accounts: 解析后的站点账号列表（可选）
         """
         provider = data.get("provider", "anyrouter")
         name = data.get("name")
 
         # Handle different authentication types
+        api_user = data.get("api_user", "")
         cookies = data.get("cookies", "")
+        system_access_token = data.get("system_access_token", "")
         proxy = data.get("proxy")
 
-        # 提取已知字段
-        known_keys = {"provider", "name", "cookies", "api_user", "linux.do", "github", "proxy"}
-        # 收集额外的配置字段
+        known_keys = {"provider", "name", "cookies", "api_user", "linux.do", "github", "site", "system_access_token", "proxy"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
 
         return cls(
             provider=provider,
             name=name if name else None,
+            api_user=api_user,
             cookies=cookies,
-            api_user=data.get("api_user", ""),
+            system_access_token=system_access_token,
             linux_do=linux_do_accounts,
             github=github_accounts,
+            site=site_accounts,
             proxy=proxy,
             extra=extra,
         )
@@ -284,6 +313,55 @@ class AppConfig:
     linux_do_accounts: List["OAuthAccountConfig"] = field(default_factory=list)  # 全局 Linux.do 账号列表
     github_accounts: List["OAuthAccountConfig"] = field(default_factory=list)  # 全局 GitHub 账号列表
     global_proxy: Dict | None = None
+
+    @classmethod
+    def _parse_site_config(
+        cls,
+        config_value,
+        account_index: int,
+    ) -> List["SiteAccountConfig"] | None:
+        """解析站点账号密码配置，支持单个账号或多个账号"""
+        if isinstance(config_value, dict):
+            if "username" not in config_value or "password" not in config_value:
+                print(f"❌ Account {account_index + 1} site configuration must contain username and password")
+                return None
+
+            if not config_value["username"] or not config_value["password"]:
+                print(f"❌ Account {account_index + 1} site username and password cannot be empty")
+                return None
+
+            if config_value.get("mode", "auto") not in ("auto", "api", "browser"):
+                print(f"❌ Account {account_index + 1} site mode must be auto, api, or browser")
+                return None
+
+            return [SiteAccountConfig.from_dict(config_value)]
+
+        if isinstance(config_value, list):
+            accounts = []
+            for j, item in enumerate(config_value):
+                if not isinstance(item, dict):
+                    print(f"❌ Account {account_index + 1} site[{j}] must be a dictionary")
+                    return None
+
+                if "username" not in item or "password" not in item:
+                    print(f"❌ Account {account_index + 1} site[{j}] must contain username and password")
+                    return None
+
+                if not item["username"] or not item["password"]:
+                    print(f"❌ Account {account_index + 1} site[{j}] username and password cannot be empty")
+                    return None
+
+                if item.get("mode", "auto") not in ("auto", "api", "browser"):
+                    print(f"❌ Account {account_index + 1} site[{j}] mode must be auto, api, or browser")
+                    return None
+
+                accounts.append(SiteAccountConfig.from_dict(item))
+            return accounts
+
+        print(f"❌ Account {account_index + 1} site configuration must be dict or array")
+        return None
+
+
 
     @classmethod
     def load_from_env(
@@ -355,6 +433,9 @@ class AppConfig:
         # 遍历所有自定义 provider
         for provider_name, provider_config in providers.items():
             if not provider_config.isCustomize:
+                continue
+
+            if not provider_config.auto_add:
                 continue
 
             # 如果该 provider 已经在 accounts 中，跳过
@@ -451,24 +532,24 @@ class AppConfig:
                 aliyun_captcha=False,
                 bypass_method="waf_cookies",
             ),
-            "agentrouter": ProviderConfig(
-                name="agentrouter",
-                origin="https://agentrouter.org",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path=None,  # 无需签到接口，查询用户信息时自动完成签到
-                check_in_status=False,
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                api_user_key="new-api-user",
-                github_client_id="Ov23lidtiR4LeVZvVRNL",
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="KZUecGfhhDZMVnv8UtEdhOhf9sNOhqVX",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=True,
-                bypass_method=None,
-            ),
+            # "agentrouter": ProviderConfig(
+            #     name="agentrouter",
+            #     origin="https://agentrouter.org",
+            #     login_path="/login",
+            #     status_path="/api/status",
+            #     auth_state_path="/api/oauth/state",
+            #     check_in_path=None,  # 无需签到接口，查询用户信息时自动完成签到
+            #     check_in_status=False,
+            #     user_info_path="/api/user/self",
+            #     topup_path="/api/user/topup",
+            #     api_user_key="new-api-user",
+            #     github_client_id="Ov23lidtiR4LeVZvVRNL",
+            #     github_auth_path="/api/oauth/github",
+            #     linuxdo_client_id="KZUecGfhhDZMVnv8UtEdhOhf9sNOhqVX",
+            #     linuxdo_auth_path="/api/oauth/linuxdo",
+            #     aliyun_captcha=True,
+            #     bypass_method=None,
+            # ),
             "wong": ProviderConfig(
                 name="wong",
                 origin="https://wzw.pp.ua",
@@ -562,6 +643,44 @@ class AppConfig:
                 aliyun_captcha=False,
                 bypass_method=None,
             ),
+            "muyuan": ProviderConfig(
+                name="muyuan",
+                origin="https://muyuan.do",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=True,  # 使用标准签到状态查询
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id=None,
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method="cf_clearance",
+            ),
+            "gpt-bjqdtd": ProviderConfig(
+                name="gpt-bjqdtd",
+                origin="https://gpt.bjqdtd.com",
+                login_path="/login",
+                status_path="/api/status",
+                auth_state_path="/api/oauth/state",
+                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
+                check_in_status=True,  # 使用标准签到状态查询
+                user_info_path="/api/user/self",
+                topup_path="/api/user/topup",
+                get_cdk=None,
+                api_user_key="new-api-user",
+                github_client_id=None,
+                github_auth_path="/api/oauth/github",
+                linuxdo_client_id="c71qJ8q7BS2wg1c6QMzBxijd9kHOhUHi",
+                linuxdo_auth_path="/api/oauth/linuxdo",
+                aliyun_captcha=False,
+                bypass_method=None,
+            ),
             # "neb": ProviderConfig(
             #     name="neb",
             #     origin="https://ai.zzhdsgsss.xyz",
@@ -640,25 +759,6 @@ class AppConfig:
             #     aliyun_captcha=False,
             #     bypass_method="cf_clearance",
             # ),
-            # "lightllm": ProviderConfig(
-            #     name="lightllm",
-            #     origin="https://lightllm.online",
-            #     login_path="/login",
-            #     status_path="/api/status",
-            #     auth_state_path="/api/oauth/state",
-            #     check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-            #     check_in_status=True,  # 使用标准签到状态查询
-            #     user_info_path="/api/user/self",
-            #     topup_path="/api/user/topup",
-            #     get_cdk=None,
-            #     api_user_key="new-api-user",
-            #     github_client_id=None,
-            #     github_auth_path="/api/oauth/github",
-            #     linuxdo_client_id="i7YfDNeJPx8Rbjx8JpD10YgQ2TVElVA4",
-            #     linuxdo_auth_path="/api/oauth/linuxdo",
-            #     aliyun_captcha=False,
-            #     bypass_method=None,
-            # ),
             "takeapi": ProviderConfig(
                 name="takeapi",
                 origin="https://codex.661118.xyz",
@@ -731,25 +831,6 @@ class AppConfig:
                 github_client_id=None,
                 github_auth_path="/api/oauth/github",
                 linuxdo_client_id="XNJfOdoSeXkcx80mDydoheJ0nZS4tjIf",
-                linuxdo_auth_path="/api/oauth/linuxdo",
-                aliyun_captcha=False,
-                bypass_method=None,
-            ),
-            "openai-test": ProviderConfig(
-                name="openai-test",
-                origin="https://new-api.abrdns.com",
-                login_path="/login",
-                status_path="/api/status",
-                auth_state_path="/api/oauth/state",
-                check_in_path="/api/user/checkin",  # 标准 newapi checkin 接口
-                check_in_status=True,  # 使用标准签到状态查询
-                user_info_path="/api/user/self",
-                topup_path="/api/user/topup",
-                get_cdk=None,
-                api_user_key="new-api-user",
-                github_client_id=None,
-                github_auth_path="/api/oauth/github",
-                linuxdo_client_id="l7O9zX1vWfka90bQunh7A8BulvEVTB1Y",
                 linuxdo_auth_path="/api/oauth/linuxdo",
                 aliyun_captcha=False,
                 bypass_method=None,
@@ -958,6 +1039,8 @@ class AppConfig:
                 # 检查配置键是否存在
                 has_linux_do = "linux.do" in account
                 has_github = "github" in account
+                has_site = "site" in account
+                has_system_access_token = "system_access_token" in account
                 has_cookies = "cookies" in account
 
                 # 解析 linux.do 配置（支持 bool、单个账号、多个账号）
@@ -986,6 +1069,26 @@ class AppConfig:
                         print(f"⚠️ {account_name} github configuration is invalid, skipping")
                         continue
 
+                site_accounts = None
+                if has_site:
+                    site_accounts = cls._parse_site_config(account["site"], i)
+                    if site_accounts is None:
+                        print(f"⚠️ {account_name} site configuration is invalid, skipping")
+                        continue
+
+                # 验证 system_access_token 配置
+                valid_system_access_token = False
+                if has_system_access_token:
+                    system_access_token_value = account.get("system_access_token")
+                    api_user = account.get("api_user")
+
+                    if system_access_token_value and api_user:
+                        valid_system_access_token = True
+                    elif system_access_token_value and not api_user:
+                        print(f"⚠️ {account_name} with system_access_token must have api_user field")
+                    elif not system_access_token_value:
+                        print(f"⚠️ {account_name} system_access_token is empty")
+
                 # 验证 cookies 配置
                 valid_cookies = False
                 if has_cookies:
@@ -1002,16 +1105,18 @@ class AppConfig:
                 # 检查解析后是否至少有一个有效的认证方式
                 has_valid_linux_do = linux_do_accounts is not None and len(linux_do_accounts) > 0
                 has_valid_github = github_accounts is not None and len(github_accounts) > 0
-                has_valid_cookies = valid_cookies
+                has_valid_site = site_accounts is not None and len(site_accounts) > 0
 
-                if not has_valid_linux_do and not has_valid_github and not has_valid_cookies:
+                if not has_valid_linux_do and not has_valid_github and not has_valid_site and not valid_system_access_token and not valid_cookies:
                     print(
-                        f"⚠️ {account_name} must have at least one valid authentication method (linux.do, github, or cookies), skipping"
+                        f"⚠️ {account_name} must have at least one valid authentication method (site, linux.do, github, system_access_token, or cookies), skipping"
                     )
                     continue
 
-                # 创建 AccountConfig，传入解析后的 OAuth 账号列表
-                account_config = AccountConfig.from_dict(account, linux_do_accounts, github_accounts)
+                # 创建 AccountConfig，传入解析后的账号列表
+                account_config = AccountConfig.from_dict(
+                    account, linux_do_accounts, github_accounts, site_accounts
+                )
                 accounts.append(account_config)
 
             return accounts

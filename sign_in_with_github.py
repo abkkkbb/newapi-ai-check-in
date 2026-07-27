@@ -5,14 +5,16 @@
 
 import json
 import os
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
+
 from camoufox.async_api import AsyncCamoufox
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
-from utils.browser_utils import filter_cookies, take_screenshot, save_page_content_to_file
+
+from utils.browser_utils import filter_cookies, save_page_content_to_file, take_screenshot
 from utils.config import ProviderConfig
-from utils.wait_for_secrets import WaitForSecrets
 from utils.get_headers import get_browser_headers, print_browser_headers
 from utils.storage_state import ensure_storage_state_from_env
+from utils.wait_for_secrets import WaitForSecrets
 
 STORAGE_STATE_ENV_NAME = "STORATE_STATES_GITHUB"
 
@@ -322,6 +324,7 @@ class GitHubSignIn:
 
                     # 从 localStorage 获取 user 对象并提取 id
                     api_user = None
+                    current_url = page.url
                     try:
                         try:
                             await page.wait_for_function('localStorage.getItem("user") !== null', timeout=10000)
@@ -367,8 +370,7 @@ class GitHubSignIn:
                     else:
                         print(f"⚠️ {self.account_name}: OAuth callback received but no user ID found")
                         await take_screenshot(page, "github_oauth_failed_no_user_id", self.account_name)
-
-                        parsed_url = urlparse(page.url)
+                        parsed_url = urlparse(current_url)
                         query_params = parse_qs(parsed_url.query)
 
                         # 如果 query 中包含 code，说明 OAuth 回调成功
@@ -388,7 +390,10 @@ class GitHubSignIn:
                                 )
                             return True, query_params, browser_headers
                         else:
-                            print(f"❌ {self.account_name}: OAuth failed, no code in callback")
+                            print(
+                                f"❌ {self.account_name}: OAuth failed, no code in callback\n"
+                                f"Parsed url is: {current_url}"
+                            )
                             return (
                                 False,
                                 {

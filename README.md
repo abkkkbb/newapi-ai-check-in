@@ -1,6 +1,6 @@
 # newapi.ai 多账号自动签到
 
-用于公益站多账号每日签到。  
+用于公益站多账号每日签到。
 
 Affs:
 - [AnyRouter](https://anyrouter.top/register?aff=wJrb)
@@ -19,6 +19,7 @@ Affs:
 - ✅ 多种机器人通知（可选）
 - ✅ linux.do 登录认证
 - ✅ github 登录认证 (with OTP)
+- ✅ 站点账号密码登录认证
 - ✅ Cloudflare bypass
 
 ## 使用方法
@@ -41,16 +42,17 @@ Affs:
 
 仓库根目录提供了一个纯 HTML 生成器：`secret-json-generator.html`。
 
+在线打开：[Secret JSON Generator](https://acehubert.github.io/newapi-ai-check-in/secret-json-generator.html)
+
 使用方式：
 
 1. 在本地直接双击打开 `secret-json-generator.html`（或拖进浏览器）
-2. 选择要生成的 secret（如 `ACCOUNTS`、`ACCOUNTS_996`、`ACCOUNTS_QAQ_AL`、`PROXY`、`PROVIDERS`）
+2. 选择要生成的 secret（如 `ACCOUNTS`、`PROXY`、`PROVIDERS`）
 3. 按页面提示填入参数并点击「产出 JSON」
 4. 复制结果，粘贴到 GitHub -> Settings -> Environments -> `production` -> Environment secrets 的 Value
 
 说明：
 - 生成器只在浏览器本地运行，不会上传你的账号或密码。
-- `PROXY` 类型产出的 JSON 可用于 `PROXY`、`PROXY_996`、`PROXY_QAQ_AL`。
 - `ACCOUNTS_LINUX_DO` 与 `ACCOUNTS_GITHUB` 使用相同 JSON 数组格式（`[{"username":"...","password":"..."}]`）。
 
 #### 2.1 全局 OAuth 账号配置（可选）
@@ -84,11 +86,11 @@ Affs:
 ```
 
 ### 3 多账号配置格式
-> 如果未提供 `name` 字段，会使用 `{provider.name} 1`、`{provider.name} 2` 等默认名称。  
-> 配置中 `cookies`、`github`、`linux.do` 必须至少配置 1 个。  
-> 使用 `cookies` 设置时，`api_user` 字段必填。  
+> 如果未提供 `name` 字段，会使用 `{provider.name} 1`、`{provider.name} 2` 等默认名称。
+> 配置中 `cookies`、`github`、`linux.do`、`site` 必须至少配置 1 个。
+> 使用 `cookies` 设置时，`api_user` 字段必填。
 
-#### 3.1 OAuth 配置支持三种格式
+#### 3.1 登录配置格式
 
 `github` 和 `linux.do` 字段支持以下三种配置格式：
 
@@ -111,6 +113,21 @@ Affs:
 ]}
 ```
 
+`site` 字段支持以下两种配置格式：
+
+**1. dict 类型 - 单个站点账号**
+```json
+{"provider": "anyrouter", "site": {"username": "站点用户名", "password": "站点密码"}}
+```
+
+**2. array 类型 - 多个站点账号**
+```json
+{"provider": "anyrouter", "site": [
+  {"username": "用户名1", "password": "密码1"},
+  {"username": "用户名2", "password": "密码2", "mode": "browser"}
+]}
+```
+
 #### 3.2 完整示例
 
 ```json
@@ -120,6 +137,7 @@ Affs:
       "cookies": {
         "session": "account1_session_value"
       },
+      "system_access_token": "sk-xxxxxxxxxxxxxxxx"
       "api_user": "account1_api_user_id",
       "github": {
         "username": "myuser",
@@ -128,6 +146,10 @@ Affs:
       "linux.do": {
         "username": "myuser",
         "password": "mypass"
+      },
+      "site": {
+        "username": "site-user",
+        "password": "site-pass"
       },
       // --- 额外的配置说明 ---
       // 当前账号使用代理
@@ -145,13 +167,13 @@ Affs:
     },
     {
       "name": "使用全局账号",
-      "provider": "agentrouter",
+      "provider": "anyrouter",
       "linux.do": true,
       "github": true
     },
     {
       "name": "多个 OAuth 账号",
-      "provider": "wong",
+      "provider": "anyrouter",
       "linux.do": [
         {"username": "user1", "password": "pass1"},
         {"username": "user2", "password": "pass2"}
@@ -166,7 +188,8 @@ Affs:
 - `provider` (可选)：供应商，内置 `anyrouter`、`wong`、`huan666`、`x666`、`kfc`、`elysiver`、`hotaru`默认使用 `anyrouter`
 - `proxy` (可选)：单个账号代理配置，支持 `http`、`socks5` 代理
 - `cookies`(可选)：用于身份验证的 cookies 数据
-- `api_user`(cookies 设置时必需)：用于请求头的 new-api-user 参数
+- `system_access_token`(可选)：系统访问令牌，通过 `Authorization: Bearer <token>` 方式认证签到
+- `api_user`(cookies 或 system_access_token 设置时必需)：用于请求头的 new-api-user 参数
 - `linux.do`(可选)：用于登录身份验证，支持三种格式：
   - `true`：使用 `LINUX_DO_ACCOUNTS` 中的全局账号
   - `{"username": "xxx", "password": "xxx"}`：单个账号
@@ -175,17 +198,30 @@ Affs:
   - `true`：使用 `GITHUB_ACCOUNTS` 中的全局账号
   - `{"username": "xxx", "password": "xxx"}`：单个账号
   - `[{"username": "xxx", "password": "xxx"}, ...]`：多个账号
+- `site`(可选)：用于站点账号密码登录，支持两种格式：
+  - `{"username": "xxx", "password": "xxx"}`：单个账号
+  - `[{"username": "xxx", "password": "xxx"}, ...]`：多个账号
+  - `mode` 可选值：`auto`、`api`、`browser`，默认 `auto`
+
+#### 3.3.1 `site` 登录说明
+
+- `mode=api`：直接请求站点登录接口：`/api/user/login?turnstile=`。
+- `mode=browser`：使用内置浏览器打开登录页，切换到“邮箱或用户名登录”，填写账号密码并提交。
+- `mode=auto`：先尝试 `api` 登录，失败后自动回退到 `browser` 登录。
+- 登录成功后会自动读取响应或浏览器中的 cookie，并使用响应中的 `data.id` 或页面本地存储/用户信息接口中的用户 ID 作为 `api_user`。
+- 因此使用 `site` 登录时，不需要手动填写 `cookies.session` 和 `api_user`。
+- 如果目标站点启用了额外验证码、前端校验或防护，优先使用 `mode=auto` 或 `mode=browser`。
 
 #### 3.4 供应商配置：
 
 在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
    - Name: `PROVIDERS`
    - Value: 供应商
-   - 说明: 自定义的 provider 会自动添加到账号中执行（在账号配置中没有使用自定义 provider 情况下, 详见 [PROVIDERS.json](./PROVIDERS.json)）。
+   - 说明: 自定义 provider 默认不会自动添加到账号中；只有配置 `"auto_add": true`，且账号配置中没有使用该 provider 时，才会自动添加执行（详见 [PROVIDERS.json](./PROVIDERS.json)）。
 
 
 #### 3.5 代理配置
-> 应用到所有的账号，如果单个账号需要使用代理，请在单个账号配置中添加 `proxy` 字段。  
+> 应用到所有的账号，如果单个账号需要使用代理，请在单个账号配置中添加 `proxy` 字段。
 > 打开 [webshare](https://dashboard.webshare.io/) 注册账号，获取免费代理
 
 在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
@@ -218,7 +254,24 @@ Affs:
 
 ![获取 api_user](./assets/request-api-user.png)
 
-#### 3.7 `GitHub` 在新设备上登录会有两次验证
+#### 3.7 如何获取 System Access Token
+
+登录 newapi 后台，进入 **个人设置 -> 账户管理 -> 安全设置** 页面，点击 **生成令牌** 复制生成的令牌值。
+
+![获取 System Access Token](./assets/system-access-token.png)
+
+获取到令牌后，在账号配置中设置 `system_access_token` 和 `api_user` 字段即可：
+
+```json
+{
+  "name": "使用系统访问令牌",
+  "provider": "x666",
+  "api_user": "12345",
+  "system_access_token": "sk-xxxxxxxxxxxxxxxx"
+}
+```
+
+#### 3.8 `GitHub` 在新设备上登录会有两次验证
 
 通过打印日志中链接打开并输入验证码。
 
