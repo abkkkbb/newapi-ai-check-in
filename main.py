@@ -6,6 +6,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime
 from dotenv import load_dotenv
@@ -13,6 +14,7 @@ from utils.config import AppConfig
 from utils.notify import notify
 from utils.balance_hash import load_balance_hash, save_balance_hash
 from checkin import CheckIn
+from sub2api_checkin import Sub2ApiCheckIn
 
 load_dotenv(override=True)
 
@@ -144,6 +146,67 @@ async def main():
             print(f"❌ {account_name} processing exception: {e}")
             need_notify = True  # 异常也需要通知
             notification_content.append(f"❌ {account_name} Exception: {str(e)[:100]}...")
+
+    # === Sub2API 签到 ===
+    sub2api_sites_str = os.getenv("SUB2API_SITES")
+    if sub2api_sites_str:
+        print("\n" + "=" * 60)
+        print("🚀 Sub2API 站点签到开始")
+        print("=" * 60)
+
+        try:
+            sub2api_sites = json.loads(sub2api_sites_str)
+            if not isinstance(sub2api_sites, list):
+                print("❌ SUB2API_SITES 必须是 JSON 数组格式")
+            else:
+                for site in sub2api_sites:
+                    if not isinstance(site, dict) or not site.get("origin") or not site.get("refresh_token"):
+                        print(f"⚠️ 跳过无效的 Sub2API 站点配置: {site}")
+                        continue
+
+                    site_name = site.get("name") or site["origin"]
+
+                    if len(notification_content) > 0:
+                        notification_content.append("\n-------------------------------")
+
+                    try:
+                        checkin = Sub2ApiCheckIn(site)
+                        success, user_info = await checkin.execute()
+                        total_count += 1
+
+                        if success:
+                            success_count += 1
+                            need_notify = True
+
+                        status = "✅ SUCCESS" if success else "❌ FAILED"
+                        account_result = f"📣 {site_name} (Sub2API) Summary:\n"
+                        account_result += f"  {status}\n"
+
+                        if user_info and user_info.get("success"):
+                            account_result += f"    💰 {user_info['display']}\n"
+                            current_balances[f"sub2api_{site_name}"] = {
+                                "sub2api": {
+                                    "quota": user_info.get("quota", 0),
+                                    "used": user_info.get("used_quota", 0),
+                                    "bonus": 0,
+                                }
+                            }
+                        elif user_info and user_info.get("error"):
+                            account_result += f"    🔺 {user_info['error']}\n"
+                            if user_info.get("need_relogin"):
+                                account_result += "    💡 请重新从浏览器获取 refresh_token\n"
+                            need_notify = True
+
+                        notification_content.append(account_result)
+
+                    except Exception as e:
+                        print(f"❌ {site_name} Sub2API 签到异常: {e}")
+                        need_notify = True
+                        notification_content.append(f"❌ {site_name} (Sub2API) Exception: {str(e)[:100]}...")
+                        total_count += 1
+
+        except json.JSONDecodeError as e:
+            print(f"❌ SUB2API_SITES JSON 格式错误: {e}")
 
     # 检查余额变化
     current_balance_hash = generate_balance_hash(current_balances) if current_balances else None

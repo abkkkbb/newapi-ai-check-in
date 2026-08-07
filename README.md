@@ -294,6 +294,53 @@ Affs:
 
 ![运行结果](./assets/check-in.png)
 
+### 6. Sub2API 站点签到（可选）
+
+除 newapi 系站点外，还支持 Sub2API 站点的自动签到。Sub2API 使用 JWT access token + refresh token 认证，每次签到前自动刷新 token 并持久化，**一次配置 refresh token 即可持续签到（30 天滚动续期）**。
+
+#### 6.1 获取 refresh_token
+
+1. 在浏览器登录你的 Sub2API 站点
+2. 按 F12 打开开发者工具，切到 Application 面板
+3. 左侧 Local Storage -> 选择站点域名 -> 找到 `refresh_token` 的值
+
+#### 6.2 配置 Secret
+
+在仓库的 Settings -> Environments -> production -> Environment secrets 中添加：
+   - Name: `SUB2API_SITES`
+   - Value: Sub2API 站点配置（JSON 数组）
+
+```json
+[
+  {
+    "name": "我的sub2api站",
+    "origin": "https://xxx.example.com",
+    "refresh_token": "rt_xxxxxxxxxxxxx"
+  },
+  {
+    "name": "另一个站",
+    "origin": "https://yyy.example.com",
+    "refresh_token": "rt_yyyyyyyyyyy"
+  }
+]
+```
+
+#### 6.3 字段说明
+
+- `name`（可选）：站点显示名称
+- `origin`（必填）：站点地址，如 `https://xxx.example.com`
+- `refresh_token`（必填）：从浏览器 localStorage 获取的 refresh token，首次运行后自动通过 GitHub Actions cache 持久化旋转后的新 token
+- `proxy`（可选）：单个账号代理配置，格式同 `PROXY`
+
+#### 6.4 工作原理
+
+- 每次签到先调 `/api/v1/auth/refresh` 刷新 access token（refresh token 旋转，旧 token 失效）
+- 旋转后的新 refresh token 写入 `sub2api-tokens/` 目录，由 GitHub Actions cache 持久化
+- 下次签到优先读缓存中的最新 refresh token，初始值仅首次运行或缓存丢失时使用
+- 签到接口自动探测：先试 `/api/v1/check-in`，404/405 降级到 `/api/v1/redeem/checkin`
+
+> ⚠️ refresh token 默认 30 天有效，只要每次签到间隔不超过 30 天，token 会自动滚动续期。超过 30 天未签到或 refresh token 被站点前端旋转导致失效时，需重新获取。
+
 ## 执行时间
 
 - 脚本每 8 小时执行一次（1. action 无法准确触发，基本延时 1~1.5h；2. 目前观测到 anyrouter.top 的签到是每 24h 而不是零点就可签到）

@@ -94,6 +94,15 @@ jobs:
         restore-keys: |
           storage-state-
 
+    - name: 恢复 Sub2API token 缓存
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          sub2api-tokens
+        key: sub2api-tokens-${{ hashFiles('sub2api-tokens/*.json') }}
+        restore-keys: |
+          sub2api-tokens-
+
     - name: 恢复余额历史缓存
       uses: actions/cache/restore@v4
       with:
@@ -110,6 +119,7 @@ jobs:
         ACCOUNTS_GITHUB: ${{ secrets.ACCOUNTS_GITHUB }}
         PROVIDERS: ${{ inputs.providers || secrets.PROVIDERS }}
         PROXY: ${{secrets.PROXY}}
+        SUB2API_SITES: ${{ secrets.SUB2API_SITES }}
         STORATE_STATES_GITHUB: ${{ secrets.STORATE_STATES_GITHUB }}
         STORATE_STATES_LINUXDO: ${{ secrets.STORATE_STATES_LINUXDO }}
         DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
@@ -149,6 +159,14 @@ jobs:
         path: |
           storage-states
         key: storage-state-${{ hashFiles('storage-states/*.json') }}
+
+    - name: 保存 Sub2API token 缓存
+      if: hashFiles('sub2api-tokens/*.json') != ''
+      uses: actions/cache/save@v4
+      with:
+        path: |
+          sub2api-tokens
+        key: sub2api-tokens-${{ hashFiles('sub2api-tokens/*.json') }}
 
     - name: 保存余额历史缓存
       if: hashFiles('balance_hash.txt') != ''
