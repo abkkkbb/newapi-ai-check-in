@@ -20,7 +20,7 @@ OUTPUT_PATH = "xray_config.json"
 REALITY_REQUIRED_PARAMS = ("pbk", "fp", "sni", "sid")
 
 # 支持的 security
-ALLOWED_SECURITY = ("reality", "tls")
+ALLOWED_SECURITY = ("reality", "tls", "none")
 
 # 支持的传输类型
 ALLOWED_NETWORK_TYPES = ("tcp", "ws", "grpc")
@@ -100,7 +100,7 @@ def parse_vless_url(url: str) -> dict:
         spx = _get_single(params, "spx")
         if spx:
             result["spx"] = unquote(spx)
-    else:
+    elif security == "tls":
         # TLS: sni/fp 可选；alpn/allowInsecure 可选
         sni = _get_single(params, "sni") or _get_single(params, "peer")
         if sni:
@@ -112,6 +112,7 @@ def parse_vless_url(url: str) -> dict:
         if alpn:
             result["alpn"] = [x for x in unquote(alpn).split(",") if x]
         result["allowInsecure"] = _get_single(params, "allowInsecure") in ("1", "true")
+    # security == "none": 纯 VLESS，无 TLS/Reality 层，不需要额外参数
 
     # 传输层可选参数
     if network == "ws":
@@ -162,7 +163,7 @@ def build_xray_config(vless: dict, socks_port: int) -> dict:
         if "spx" in vless:
             reality_settings["spiderX"] = vless["spx"]
         stream_settings["realitySettings"] = reality_settings
-    else:
+    elif vless["security"] == "tls":
         tls_settings: dict = {}
         if "sni" in vless:
             tls_settings["serverName"] = vless["sni"]
@@ -173,6 +174,8 @@ def build_xray_config(vless: dict, socks_port: int) -> dict:
         if vless.get("allowInsecure"):
             tls_settings["allowInsecure"] = True
         stream_settings["tlsSettings"] = tls_settings
+    # security == "none": 纯 VLESS，无传输层加密设置
+    # stream_settings 已含 "security": "none"，Xray 会按无加密处理
 
     if vless["network"] == "ws":
         ws_settings: dict = {}

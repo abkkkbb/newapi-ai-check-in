@@ -149,6 +149,10 @@ jobs:
         # 生成配置
         echo "⚙️ 正在生成 Xray 配置..."
         uv run python scripts/setup_xray.py
+        if ($LASTEXITCODE -ne 0) {
+          echo "❌ Xray 配置生成失败，终止任务"
+          exit 1
+        }
 
         # 后台启动 Xray
         echo "🚀 正在启动 Xray..."
