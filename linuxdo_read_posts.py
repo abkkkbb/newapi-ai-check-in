@@ -39,6 +39,7 @@ class LinuxDoReadPosts:
         self,
         username: str,
         password: str,
+        proxy: dict | str | None = None,
         storage_state_dir: str = DEFAULT_STORAGE_STATE_DIR,
     ):
         """初始化
@@ -46,10 +47,13 @@ class LinuxDoReadPosts:
         Args:
             username: Linux.do 用户名
             password: Linux.do 密码
+            proxy: 该账号专属代理配置，可为字符串("socks5://...")或 dict({"server": ...})；
+                   未配置时回退到全局 PROXY 环境变量
             storage_state_dir: 缓存目录，默认与 checkin.py 共享
         """
         self.username = username
         self.password = password
+        self.proxy = proxy
         self.masked_username = mask_username(username)  # 用于日志输出的掩码用户名
         self.storage_state_dir = storage_state_dir
         # 使用用户名哈希生成缓存文件名，与 checkin.py 保持一致
@@ -282,23 +286,72 @@ class LinuxDoReadPosts:
             return False
 
     @staticmethod
-    def _load_proxy() -> dict | None:
-        """从 PROXY 环境变量加载代理配置
+    def _parse_proxy(proxy) -> dict | None:
+        """将代理配置统一解析为 camoufox 需要的 dict 格式
+
+        Args:
+            proxy: 代理配置，可为字符串("socks5://127.0.0.1:1080")或 dict({"server": ...})
 
         Returns:
             代理配置字典，格式为 {"server": "...", "username": "...", "password": "..."}，
             或 None（未配置代理）
         """
-        proxy_str = os.getenv("PROXY", "").strip()
-        if not proxy_str:
+        if not proxy:
             return None
-        try:
-            proxy = json.loads(proxy_str)
-            if isinstance(proxy, dict) and "server" in proxy:
-                return proxy
-        except (json.JSONDecodeError, ValueError):
-            pass
-        return {"server": proxy_str}
+
+        if isinstance(proxy, str):
+            proxy_str = proxy.strip()
+            if not proxy_str:
+                return None
+            # 字符串可能是 JSON，尝试解析；必须是带 server 字段的 dict 才接受
+            try:
+                parsed = json.loads(proxy_str)
+                if isinstance(parsed, dict) and "server" in parsed:
+                    return parsed
+            except (json.JSONDecodeError, ValueError):
+                pass
+            # 否则按纯 URL 字符串处理
+            return {"server": proxy_str}
+
+        if isinstance(proxy, dict) and "server" in proxy:
+            return proxy
+
+        return None
+
+    @staticmethod
+    def _load_proxy() -> dict | None:
+        """从 PROXY 环境变量加载全局代理配置
+
+        Returns:
+            代理配置字典，格式为 {"server": "...", "username": "...", "password": "..."}，
+            或 None（未配置代理）
+        """
+        return LinuxDoReadPosts._parse_proxy(os.getenv("PROXY", "").strip())
+
+    def _resolve_proxy_config(self) -> dict | None:
+        """解析最终生效的代理配置
+
+        优先级：
+          1. 账号自身配置的 proxy（self.proxy）
+          2. 全局 PROXY 环境变量
+          3. 已配置 VLESS_URLS/VLESS_URL（Xray 已启动）时，回退本地 Xray 默认端口 1080
+
+        Returns:
+            代理配置字典，格式为 {"server": "...", "username": "...", "password": "..."}，
+            或 None（未配置代理）
+        """
+        if self.proxy:
+            return LinuxDoReadPosts._parse_proxy(self.proxy)
+
+        global_proxy = self._load_proxy()
+        if global_proxy:
+            return global_proxy
+
+        # Xray 已启动（VLESS 配置存在）但没有显式代理时，回退本地 SOCKS5 默认端口
+        if os.getenv("VLESS_URLS") or os.getenv("VLESS_URL"):
+            return {"server": "socks5://127.0.0.1:1080"}
+
+        return None
 
     def _load_topic_id(self) -> int:
         """从缓存文件读取上次的 topic_id
@@ -633,8 +686,8 @@ class LinuxDoReadPosts:
         else:
             use_headless = False
 
-        # 代理配置：从 PROXY 环境变量加载
-        proxy_config = self._load_proxy()
+        # 代理配置：优先使用账号自身配置的 proxy，未配置时回退到全局 PROXY 环境变量
+        proxy_config = self._resolve_proxy_config()
         if proxy_config:
             print(f"ℹ️ {self.masked_username}: Using proxy: {proxy_config.get('server', 'unknown')}")
 
@@ -729,7 +782,8 @@ def load_linuxdo_accounts() -> list[dict]:
 
     Returns:
         包含 linux.do 账号信息的列表，每个元素为:
-        {"username": str, "password": str}
+        {"username": str, "password": str, "proxy": str | dict (可选)}
+        其中 proxy 透传账号配置里的 proxy 字段（字符串或 dict），未配置则不包含。
     """
     accounts_str = os.getenv("ACCOUNTS")
     if not accounts_str:
@@ -765,12 +819,16 @@ def load_linuxdo_accounts() -> list[dict]:
                 continue
 
             seen_usernames.add(username)
-            linuxdo_accounts.append(
-                {
-                    "username": username,
-                    "password": password,
-                }
-            )
+
+            account_info = {
+                "username": username,
+                "password": password,
+            }
+            # 透传账号配置里的 proxy（字符串或 dict，原样保留，不改格式）
+            proxy = account.get("proxy")
+            if proxy:
+                account_info["proxy"] = proxy
+            linuxdo_accounts.append(account_info)
 
         return linuxdo_accounts
 
@@ -822,7 +880,9 @@ async def main():
             success = False
             result: dict = {"error": "No attempts"}
             for attempt in range(1, max_retries + 1):
-                reader = LinuxDoReadPosts(username=username, password=password)
+                reader = LinuxDoReadPosts(
+                    username=username, password=password, proxy=account.get("proxy")
+                )
                 if attempt > 1:
                     print(f"🔁 {masked_username}: Retry {attempt}/{max_retries}")
                 success, result = await reader.run()

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-将本地 linux.do 阅读生成的 storage state 导出为 GitHub secret 格式（STORAGE_STAGES_JSON）。
+将本地 linux.do 阅读生成的 storage state 导出为 GitHub secret 格式（STORAGE_STATES_JSON）。
 
 用法:
     uv run python scripts/export_storage_secret.py
-    # 输出即 STORAGE_STAGES_JSON secret 的 Value
+    # 输出即 STORAGE_STATES_JSON secret 的 Value
 
     uv run python scripts/export_storage_secret.py --output secret_payload.json
     # 或写入文件（secret_payload.json 已在 .gitignore 中）
@@ -25,7 +25,7 @@ STORAGE_STATE_DIR = Path("storage-states")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="导出 STORAGE_STAGES_JSON secret 内容")
+    parser = argparse.ArgumentParser(description="导出 STORAGE_STATES_JSON secret 内容")
     parser.add_argument("--output", "-o", help="输出到文件（默认输出到 stdout）")
     args = parser.parse_args()
 
@@ -46,7 +46,7 @@ def main() -> int:
     payload = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     if args.output:
         Path(args.output).write_text(payload, encoding="utf-8")
-        print(f"✅ 已写入 {args.output}，将内容复制到 GitHub secret STORAGE_STAGES_JSON", file=sys.stderr)
+        print(f"✅ 已写入 {args.output}，将内容复制到 GitHub secret STORAGE_STATES_JSON", file=sys.stderr)
     else:
         print(payload)
     return 0

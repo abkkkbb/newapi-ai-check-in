@@ -128,10 +128,11 @@ jobs:
 
     - name: 启动 Xray 代理
       env:
+        VLESS_URLS: ${{ secrets.VLESS_URLS }}
         VLESS_URL: ${{ secrets.VLESS_URL }}
       run: |
-        if (-not $env:VLESS_URL) {
-          echo "ℹ️ VLESS_URL 未配置，跳过 Xray 代理"
+        if ((-not $env:VLESS_URLS) -and (-not $env:VLESS_URL)) {
+          echo "ℹ️ VLESS_URLS 和 VLESS_URL 均未配置，跳过 Xray 代理"
           exit 0
         }
         $ErrorActionPreference = "Stop"
@@ -162,31 +163,59 @@ jobs:
         echo "Xray PID: $($proc.Id)"
 
         # 等待 SOCKS5 端口就绪
-        $ready = $false
-        for ($i = 0; $i -lt 30; $i++) {
+        # 从 VLESS_URLS 解析本地端口列表（节点 i -> 1080+i，base=1080）；未配置 VLESS_URLS 时仅检查 1080
+        $ports = @()
+        if ($env:VLESS_URLS) {
           try {
-            $tcp = New-Object System.Net.Sockets.TcpClient
-            $tcp.Connect("127.0.0.1", 1080)
-            $tcp.Close()
-            $ready = $true
-            break
+            $urls = @($env:VLESS_URLS | ConvertFrom-Json)
           } catch {
-            Start-Sleep -Seconds 1
+            echo "❌ VLESS_URLS 解析失败: $($_.Exception.Message)"
+            exit 1
+          }
+          if ($urls.Count -lt 1) {
+            echo "❌ VLESS_URLS 为空数组，无法确定 SOCKS5 端口"
+            exit 1
+          }
+          $base = 1080
+          for ($i = 0; $i -lt $urls.Count; $i++) {
+            $ports += $base + $i
+          }
+        } else {
+          $ports += 1080
+        }
+        echo "🔌 待检查 SOCKS5 端口: $($ports -join ', ')"
+        foreach ($port in $ports) {
+          $ready = $false
+          for ($i = 0; $i -lt 30; $i++) {
+            try {
+              $tcp = New-Object System.Net.Sockets.TcpClient
+              $tcp.Connect("127.0.0.1", $port)
+              $tcp.Close()
+              $ready = $true
+              break
+            } catch {
+              Start-Sleep -Seconds 1
+            }
+          }
+          if (-not $ready) {
+            echo "❌ SOCKS5 端口 $port 在 30 秒内未就绪"
+            if (Test-Path xray_error.log) { Get-Content xray_error.log }
+            exit 1
           }
         }
-        if (-not $ready) {
-          echo "❌ SOCKS5 端口 1080 在 30 秒内未就绪"
-          if (Test-Path xray_error.log) { Get-Content xray_error.log }
-          exit 1
-        }
-        echo "✅ Xray 代理已就绪 (socks5://127.0.0.1:1080)"
+        $portList = ($ports | ForEach-Object { "127.0.0.1:$_" }) -join ", "
+        echo "✅ Xray 代理已就绪 (SOCKS5 $portList)"
 
     - name: 执行阅读帖子
       env:
         ACCOUNTS: ${{ secrets.ACCOUNTS_LINUX_DO }}
         LINUXDO_BASE_TOPIC_ID: ${{ secrets.LINUXDO_BASE_TOPIC_ID }}
         LINUXDO_MAX_POSTS: ${{ secrets.LINUXDO_MAX_POSTS }}
-        PROXY: ${{ secrets.VLESS_URL && 'socks5://127.0.0.1:1080' || secrets.PROXY }}
+        # 账号级代理由 ACCOUNTS_LINUX_DO 各账号的 proxy 字段提供（如 socks5://127.0.0.1:1080）；
+        # PROXY 仅作账号未写 proxy 时的全局兜底；VLESS_URLS/VLESS_URL 透传用于脚本在无任何 proxy 配置时回退本地 Xray 默认端口 1080
+        PROXY: ${{ secrets.PROXY }}
+        VLESS_URLS: ${{ secrets.VLESS_URLS }}
+        VLESS_URL: ${{ secrets.VLESS_URL }}
         DEBUG: ${{ github.event_name == 'workflow_dispatch' && inputs.debug || vars.DEBUG || 'false' }}
         DINGDING_WEBHOOK: ${{ secrets.DINGDING_WEBHOOK }}
         EMAIL_USER: ${{ secrets.EMAIL_USER }}

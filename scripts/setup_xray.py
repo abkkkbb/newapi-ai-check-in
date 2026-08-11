@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """解析 VLESS+Reality URL 并生成 Xray 客户端配置文件。
 
-从 VLESS_URL 环境变量读取 vless:// 链接，生成 Xray JSON 配置，
-使本地 SOCKS5 代理（默认 127.0.0.1:1080）转发至远程 VLESS+Reality 服务器。
+优先从 VLESS_URLS（JSON 数组）读取多个 vless:// 链接，回退读取 VLESS_URL
+（单个链接）。生成单一 Xray JSON 配置：一个进程在多个本地端口监听 SOCKS5
+（默认从 127.0.0.1:1080 起，节点 i 对应 base+i），各自转发至对应远程节点。
 
 用法:
+    VLESS_URLS='["vless://...", "vless://..."]' python scripts/setup_xray.py
     VLESS_URL="vless://..." python scripts/setup_xray.py
 """
 
@@ -12,6 +14,13 @@ import json
 import os
 import sys
 from urllib.parse import parse_qs, unquote, urlparse
+
+# Windows 控制台/管道默认可能使用 GBK 编码，无法打印 emoji，强制 UTF-8 输出
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except (AttributeError, OSError):
+    pass
 
 # Xray 配置输出路径
 OUTPUT_PATH = "xray_config.json"
@@ -134,20 +143,8 @@ def parse_vless_url(url: str) -> dict:
     return result
 
 
-def build_xray_config(vless: dict, socks_port: int) -> dict:
-    """根据解析结果生成 Xray JSON 配置。
-
-    Args:
-        vless: parse_vless_url() 的返回值
-        socks_port: 本地 SOCKS5 监听端口
-
-    Returns:
-        Xray 配置字典
-    """
-    user_obj: dict = {"id": vless["uuid"], "encryption": "none"}
-    if "flow" in vless:
-        user_obj["flow"] = vless["flow"]
-
+def _build_stream_settings(vless: dict) -> dict:
+    """根据解析结果生成 streamSettings（Reality/TLS/none + ws/grpc 传输）。"""
     stream_settings: dict = {
         "network": vless["network"],
         "security": vless["security"],
@@ -190,82 +187,167 @@ def build_xray_config(vless: dict, socks_port: int) -> dict:
             grpc_settings["serviceName"] = vless["grpc_service_name"]
         stream_settings["grpcSettings"] = grpc_settings
 
+    return stream_settings
+
+
+def build_outbound(vless: dict, tag: str) -> dict:
+    """根据解析结果生成单个 VLESS outbound 配置。
+
+    Args:
+        vless: parse_vless_url() 的返回值
+        tag: outbound 标签（如 "out-0"）
+
+    Returns:
+        outbound 配置字典
+    """
+    user_obj: dict = {"id": vless["uuid"], "encryption": "none"}
+    if "flow" in vless:
+        user_obj["flow"] = vless["flow"]
+
+    return {
+        "tag": tag,
+        "protocol": "vless",
+        "settings": {
+            "vnext": [
+                {
+                    "address": vless["host"],
+                    "port": vless["port"],
+                    "users": [user_obj],
+                }
+            ]
+        },
+        "streamSettings": _build_stream_settings(vless),
+    }
+
+
+def build_multi_xray_config(vless_list: list[dict], base_port: int) -> dict:
+    """根据多个解析结果生成单一 Xray JSON 配置（一个进程监听多个端口）。
+
+    Args:
+        vless_list: parse_vless_url() 返回值列表
+        base_port: 基准本地 SOCKS5 端口，节点 i 对应端口 base_port + i
+
+    Returns:
+        Xray 配置字典
+    """
+    n = len(vless_list)
+    inbounds = [
+        {
+            "listen": "127.0.0.1",
+            "port": base_port + i,
+            "protocol": "socks",
+            "tag": f"in-{i}",
+            "settings": {"udp": True},
+        }
+        for i in range(n)
+    ]
+    outbounds = [
+        build_outbound(vless, f"out-{i}") for i, vless in enumerate(vless_list)
+    ]
+    routing_rules = [
+        {"type": "field", "inboundTag": [f"in-{i}"], "outboundTag": f"out-{i}"}
+        for i in range(n)
+    ]
+
     return {
         "log": {
             "loglevel": "warning",
             "access": "xray_access.log",
             "error": "xray_error.log",
         },
-        "inbounds": [
-            {
-                "listen": "127.0.0.1",
-                "port": socks_port,
-                "protocol": "socks",
-                "settings": {"udp": True},
-            }
-        ],
-        "outbounds": [
-            {
-                "protocol": "vless",
-                "settings": {
-                    "vnext": [
-                        {
-                            "address": vless["host"],
-                            "port": vless["port"],
-                            "users": [user_obj],
-                        }
-                    ]
-                },
-                "streamSettings": stream_settings,
-            }
-        ],
+        "inbounds": inbounds,
+        "outbounds": outbounds,
+        "routing": {"rules": routing_rules},
     }
 
 
-def main() -> int:
+def build_xray_config(vless: dict, socks_port: int) -> dict:
+    """根据单个解析结果生成 Xray JSON 配置（单节点兼容入口）。
+
+    Args:
+        vless: parse_vless_url() 的返回值
+        socks_port: 本地 SOCKS5 监听端口
+
+    Returns:
+        Xray 配置字典
+    """
+    return build_multi_xray_config([vless], socks_port)
+
+
+def _load_vless_urls() -> list[str] | None:
+    """读取 VLESS URL 列表。
+
+    优先读 VLESS_URLS（JSON 数组字符串）；若未设置/为空/解析失败，
+    回退读 VLESS_URL（单个链接，保持原有行为）。两者皆无返回 None。
+
+    Returns:
+        URL 字符串列表；无法获得任何 URL 时返回 None
+    """
+    urls_json = os.getenv("VLESS_URLS", "").strip()
+    if urls_json:
+        try:
+            parsed = json.loads(urls_json)
+        except json.JSONDecodeError:
+            print(
+                f"WARNING: VLESS_URLS 不是合法 JSON，忽略并回退 VLESS_URL: {urls_json}"
+            )
+        else:
+            if isinstance(parsed, list) and parsed and all(
+                isinstance(u, str) and u.strip() for u in parsed
+            ):
+                return [u.strip() for u in parsed]
+            print(
+                f"WARNING: VLESS_URLS 必须是非空 JSON 数组（元素为非空字符串），"
+                f"忽略并回退 VLESS_URL: {urls_json}"
+            )
+
     vless_url = os.getenv("VLESS_URL", "").strip()
-    if not vless_url:
-        print("ERROR: 环境变量 VLESS_URL 未设置或为空")
+    if vless_url:
+        return [vless_url]
+
+    return None
+
+
+def main() -> int:
+    vless_urls = _load_vless_urls()
+    if vless_urls is None:
+        print("ERROR: 环境变量 VLESS_URLS（JSON 数组）和 VLESS_URL 均未设置或为空")
         return 1
 
-    # 解析 VLESS URL
-    try:
-        vless = parse_vless_url(vless_url)
-    except ValueError as exc:
-        print(f"ERROR: VLESS URL 解析失败 — {exc}")
-        return 1
+    # 解析所有 VLESS URL（任何一个失败即整体失败，不允许部分成功）
+    vless_list: list[dict] = []
+    for i, url in enumerate(vless_urls):
+        try:
+            vless = parse_vless_url(url)
+        except ValueError as exc:
+            print(f"ERROR: 第 {i} 个 VLESS URL 解析失败 — {exc}")
+            return 1
+        vless_list.append(vless)
 
-    # 脱敏日志
-    summary = (
-        f"VLESS 参数: uuid={_mask(vless['uuid'])}, "
-        f"host={vless['host']}, port={vless['port']}, "
-        f"security={vless['security']}, network={vless['network']}"
-    )
-    if "sni" in vless:
-        summary += f", sni={vless['sni']}"
-    if "fp" in vless:
-        summary += f", fp={vless['fp']}"
-    if vless["security"] == "reality":
-        summary += f", pbk={_mask(vless['pbk'])}, sid={_mask(vless['sid'], 2, 2)}"
-    print(summary)
-
-    # SOCKS5 端口
+    # SOCKS5 基准端口（节点 i 使用 base_port + i）
     socks_port_str = os.getenv("SOCKS_PORT", "1080").strip()
     try:
-        socks_port = int(socks_port_str)
-        if not 1 <= socks_port <= 65535:
+        base_port = int(socks_port_str)
+        if not 1 <= base_port <= 65535:
             raise ValueError("port out of range")
     except ValueError:
         print(f"ERROR: 无效的 SOCKS_PORT: {socks_port_str}")
         return 1
 
-    # 生成配置
-    config = build_xray_config(vless, socks_port)
+    # 生成单一配置（一个进程监听多个端口）
+    config = build_multi_xray_config(vless_list, base_port)
 
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
-    print(f"Xray 配置已写入: {OUTPUT_PATH} (SOCKS5 -> 127.0.0.1:{socks_port})")
+    # 逐节点输出日志
+    for i, vless in enumerate(vless_list):
+        print(
+            f"✅ 节点{i}: {vless['host']}:{vless['port']} ({vless['security']}) "
+            f"-> 本地 SOCKS5 127.0.0.1:{base_port + i}"
+        )
+
+    print(f"Xray 配置已写入: {OUTPUT_PATH}")
     return 0
 
 

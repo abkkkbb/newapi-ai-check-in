@@ -341,6 +341,32 @@ Affs:
 
 > ⚠️ refresh token 默认 30 天有效，只要每次签到间隔不超过 30 天，token 会自动滚动续期。超过 30 天未签到或 refresh token 被站点前端旋转导致失效时，需重新获取。
 
+### 7. linux.do 自动阅读帖子（可选）
+
+独立的 `Linux.do 自动阅读帖子` workflow，每 6 小时运行一次，自动登录 linux.do 并浏览帖子。
+
+**配置：**
+- `ACCOUNTS_LINUX_DO`（必填）：linux.do 账号列表（JSON 数组，`[{"username":"...","password":"..."}]`）
+- `STORAGE_STATES_JSON`（强烈推荐）：本地登录后生成的登录态缓存，用于 GitHub 上免登录运行。格式为 `{"用户名sha256前8位": {cookies/origins}}`，可用 `scripts/export_storage_secret.py` 从本地 `storage-states/` 自动打包
+- 代理（二选一）：
+  - `VLESS_URL`：单个 vless:// 链接，Xray 本地代理（127.0.0.1:1080）
+  - `VLESS_URLS`：多节点 JSON 数组，节点 i 对应 127.0.0.1:1080+i
+
+**多账号 + 多节点代理：** 每个账号可在 `ACCOUNTS_LINUX_DO` 中通过 `proxy` 字段指定自己的本地 SOCKS5 端口，实现不同账号走不同出口 IP：
+
+```json
+[
+  {"username":"账号1","password":"p1","proxy":"socks5://127.0.0.1:1080"},
+  {"username":"账号2","password":"p2","proxy":"socks5://127.0.0.1:1081"}
+]
+```
+
+代理优先级：账号 `proxy` 字段 > 全局 `PROXY` > Xray 默认端口 1080。
+
+> ⚠️ 多账号时，请务必给每个账号显式写 `proxy` 端口。若某账号没写，它会回退到全局 `PROXY` 或 Xray 默认端口 1080（节点0），导致多个账号共用同一出口 IP。
+
+> ⚠️ 登录缓存与出口 IP 绑定。本地生成 `STORAGE_STATES_JSON` 时，请让本地浏览走与 GitHub 相同的代理节点，避免会话因 IP 不一致失效。
+
 ## 执行时间
 
 - 脚本每 8 小时执行一次（1. action 无法准确触发，基本延时 1~1.5h；2. 目前观测到 anyrouter.top 的签到是每 24h 而不是零点就可签到）
