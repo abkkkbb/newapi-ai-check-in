@@ -440,7 +440,7 @@ class LinuxDoReadPosts:
         rate_limit_delay = 10  # 429 退避延迟（秒），逐次递增
 
         while read_count < max_posts:
-            await page.wait_for_timeout(random.randint(3000, 8000))
+            await page.wait_for_timeout(random.randint(8000, 20000))
 
             if consecutive_invalid_count > 50:
                 print(
