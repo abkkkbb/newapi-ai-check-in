@@ -211,6 +211,8 @@ jobs:
         ACCOUNTS: ${{ secrets.ACCOUNTS_LINUX_DO }}
         LINUXDO_BASE_TOPIC_ID: ${{ secrets.LINUXDO_BASE_TOPIC_ID }}
         LINUXDO_MAX_POSTS: ${{ secrets.LINUXDO_MAX_POSTS }}
+        # CI 无终端可交互，禁用人工登录模式（脚本默认为 1）
+        LINUXDO_MANUAL_LOGIN: '0'
         # 账号级代理由 ACCOUNTS_LINUX_DO 各账号的 proxy 字段提供（如 socks5://127.0.0.1:1080）；
         # PROXY 仅作账号未写 proxy 时的全局兜底；VLESS_URLS/VLESS_URL 透传用于脚本在无任何 proxy 配置时回退本地 Xray 默认端口 1080
         PROXY: ${{ secrets.PROXY }}

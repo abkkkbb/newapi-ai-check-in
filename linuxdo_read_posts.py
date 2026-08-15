@@ -10,6 +10,7 @@ import os
 import sys
 import random
 from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 from camoufox.async_api import AsyncCamoufox
 from playwright_captcha import CaptchaType, ClickSolver, FrameworkType
@@ -218,6 +219,29 @@ class LinuxDoReadPosts:
             print(f"⚠️ {self.masked_username}: Error checking login status: {e}")
             return False
 
+    def _export_storage_secret(self):
+        """调用 scripts/export_storage_secret.py 自动导出 secret_payload.json
+
+        登录成功后触发，方便直接复制内容更新 GitHub secret STORAGE_STATES_JSON；
+        导出失败不影响主流程。CI 上仅写入本地文件，不会外传。
+        """
+        try:
+            import subprocess
+
+            script = Path(__file__).parent / "scripts" / "export_storage_secret.py"
+            result = subprocess.run(
+                [sys.executable, str(script), "--output", "secret_payload.json"],
+                capture_output=True,
+                text=True,
+                cwd=Path(__file__).parent,
+            )
+            if result.returncode == 0:
+                print(f"✅ {self.masked_username}: 已自动导出 STORAGE_STATES_JSON 内容到 secret_payload.json")
+            else:
+                print(f"⚠️ {self.masked_username}: 导出 secret 失败: {result.stderr.strip()}")
+        except Exception as e:
+            print(f"⚠️ {self.masked_username}: 导出 secret 异常: {e}")
+
     async def _do_login(self, page) -> bool:
         """执行登录流程
 
@@ -250,8 +274,8 @@ class LinuxDoReadPosts:
             await page.fill("#login-account-password", self.password)
             await page.wait_for_timeout(2000)
 
-            # 人工模式：用户手动过 hCaptcha 并点登录
-            if os.getenv("LINUXDO_MANUAL_LOGIN", "").strip().lower() in ("1", "true", "yes"):
+            # 人工模式：用户手动过 hCaptcha 并点登录（默认开启，CI 设 LINUXDO_MANUAL_LOGIN=0 关闭）
+            if os.getenv("LINUXDO_MANUAL_LOGIN", "1").strip().lower() in ("1", "true", "yes"):
                 print(f"👉 {self.masked_username}: 请在浏览器中手动完成人机验证并点击登录，然后在此按回车继续...")
                 await asyncio.get_event_loop().run_in_executor(None, input)
             else:
@@ -756,6 +780,9 @@ class LinuxDoReadPosts:
                         # 保存会话状态
                         await context.storage_state(path=cache_file_path)
                         print(f"✅ {self.masked_username}: Storage state saved to cache file")
+
+                        # 自动打包 storage-states/ 为 STORAGE_STATES_JSON secret 内容
+                        self._export_storage_secret()
 
                     # 浏览帖子
                     print(f"ℹ️ {self.masked_username}: Starting to read posts...")
