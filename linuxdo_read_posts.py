@@ -25,9 +25,9 @@ DEFAULT_STORAGE_STATE_DIR = "storage-states"
 # 通过 LINUXDO_BASE_TOPIC_ID 环境变量设置自定义值
 DEFAULT_BASE_TOPIC_ID = random.randint(120000, 120200)
 
-# 默认最大浏览帖子数
+# 默认最大浏览帖子数（基准值，实际在 ±250 范围内随机，即默认 1000-1500）
 # 通过 LINUXDO_MAX_POSTS 环境变量设置自定义值
-DEFAULT_MAX_POSTS = 100
+DEFAULT_MAX_POSTS = 1250
 
 # 帖子 ID 缓存目录
 TOPIC_ID_CACHE_DIR = "linuxdo_reads"
@@ -683,7 +683,7 @@ class LinuxDoReadPosts:
             )
             base_topic_id = DEFAULT_BASE_TOPIC_ID
 
-        # 从环境变量获取最大浏览帖子数，并在上下 50 范围内随机
+        # 从环境变量获取最大浏览帖子数，并在上下 250 范围内随机
         max_posts_str = os.getenv("LINUXDO_MAX_POSTS", "")
         try:
             base_max_posts = int(max_posts_str) if max_posts_str else DEFAULT_MAX_POSTS
@@ -694,8 +694,8 @@ class LinuxDoReadPosts:
             )
             base_max_posts = DEFAULT_MAX_POSTS
 
-        min_posts = max(10, base_max_posts - 50)
-        max_posts_upper = max(min_posts, base_max_posts + 50)
+        min_posts = max(10, base_max_posts - 250)
+        max_posts_upper = max(min_posts, base_max_posts + 250)
         max_posts = random.randint(min_posts, max_posts_upper)
         print(
             f"ℹ️ {self.masked_username}: Max posts range {min_posts}-{max_posts_upper}, "
